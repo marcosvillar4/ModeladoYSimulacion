@@ -1,0 +1,128 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #f8f9fb;
+    color: #1f2937;
+}
+
+.container {
+    width: min(1000px, 92vw);
+    margin: 0 auto;
+    padding: 1rem 0;
+}
+
+nav {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+a {
+    color: #1d4ed8;
+}
+
+.button {
+    display: inline-block;
+    background: #1d4ed8;
+    color: #fff;
+    text-decoration: none;
+    border: 0;
+    padding: 0.5rem 0.8rem;
+    border-radius: 0.4rem;
+    cursor: pointer;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 1rem;
+}
+
+.card {
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 0.6rem;
+    padding: 1rem;
+}
+
+.form-grid {
+    display: grid;
+    gap: 1rem;
+    max-width: 500px;
+}
+
+.math-preview-wrap {
+    margin-top: 0.4rem;
+    padding: 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.45rem;
+    background: #f9fafb;
+}
+
+.math-preview-label {
+    font-size: 0.85rem;
+    color: #6b7280;
+    margin-bottom: 0.35rem;
+}
+
+.math-preview {
+    min-height: 1.8rem;
+    font-size: 1.05rem;
+    line-height: 1.7;
+    overflow-x: auto;
+}
+
+.math-empty {
+    color: #9ca3af;
+    font-style: italic;
+}
+
+
+input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.45rem;
+    border: 1px solid #c4c9d4;
+    border-radius: 0.3rem;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1rem;
+    background: #fff;
+}
+
+th,
+td {
+    border: 1px solid #d1d5db;
+    padding: 0.4rem;
+    text-align: left;
+}
+
+.chart {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+.messages {
+    list-style: none;
+    padding: 0;
+}
+
+.message {
+    background: #dbeafe;
+    border: 1px solid #93c5fd;
+    padding: 0.6rem;
+    border-radius: 0.4rem;
+    margin-bottom: 0.8rem;
+}
+
+.errorlist,
+.error-list {
+    color: #b91c1c;
+    margin: 0.2rem 0;
+}
+

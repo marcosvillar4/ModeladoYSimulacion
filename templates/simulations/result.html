@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}Resultado - {{ payload.title }}{% endblock %}
+
+{% block content %}
+<section>
+    <h2>{{ payload.result.title|render_math_text }}</h2>
+    <p>{{ payload.result.description|render_math_text }}</p>
+
+    <h3>Parametros de entrada</h3>
+    <table>
+        <thead>
+            <tr><th>Parametro</th><th>Valor</th></tr>
+        </thead>
+        <tbody>
+            {% for key, value in payload.input.items %}
+                <tr>
+                    <td>{{ key|render_math_text }}</td>
+                    <td>
+                        {% if key in expression_names %}
+                            {{ value|render_math_text }}
+                        {% else %}
+                            {{ value }}
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>Resumen</h3>
+    <table>
+        <thead>
+            <tr><th>Metrica</th><th>Valor</th></tr>
+        </thead>
+        <tbody>
+            {% for key, value in payload.result.summary.items %}
+                <tr><td>{{ key|render_math_text }}</td><td>{{ value|render_math_text }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>Grafico</h3>
+    <img src="{{ payload.result.plot }}" alt="grafico de simulacion" class="chart">
+
+    <h3>Muestra de resultados</h3>
+    <table>
+        <thead>
+            <tr>
+                {% for head in payload.result.table.headers %}
+                    <th>{{ head|render_math_text }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in payload.result.table.rows %}
+                <tr>
+                    {% for cell in row %}
+                        <td>{{ cell|render_math_text }}</td>
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <p>
+        <a class="button" href="{% url 'simulations:run' slug=payload.slug %}">Volver a ejecutar</a>
+    </p>
+</section>
+{% endblock %}
+

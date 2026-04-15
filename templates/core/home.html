@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block title %}Inicio - Modelado y Simulacion{% endblock %}
+
+{% block content %}
+<section>
+    <h2>Plataforma de simulaciones</h2>
+    <p>
+        Este sitio permite ejecutar scripts de modelado y simulacion desde formularios web,
+        ingresando funciones matematicas y parametros numericos.
+    </p>
+    <a class="button" href="{% url 'simulations:list' %}">Ir a simulaciones</a>
+</section>
+{% endblock %}
+

@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ spec.title }}{% endblock %}
+
+{% block content %}
+<section>
+    <h2>{{ spec.title|render_math_text }}</h2>
+    <p>{{ spec.description|render_math_text }}</p>
+
+    <form method="post" class="form-grid">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+            <div class="error-list">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        {% for field in form %}
+            <div>
+                <label for="{{ field.id_for_label }}">{{ field.label|render_math_text }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                    <small>{{ field.help_text|render_math_text }}</small>
+                {% endif %}
+                {% if field.errors %}
+                    <div class="error-list">{{ field.errors }}</div>
+                {% endif %}
+                {% if field.name in expression_names %}
+                    <div class="math-preview-wrap">
+                        <div class="math-preview-label">Vista previa</div>
+                        <div class="math-preview" data-math-preview-for="{{ field.id_for_label }}"></div>
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        <button class="button" type="submit">Ejecutar simulacion</button>
+    </form>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script defer src="{% static 'js/formula_preview.js' %}"></script>
+{% endblock %}
+

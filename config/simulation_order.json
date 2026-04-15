@@ -1,0 +1,21 @@
+[
+  "punto-fijo",
+  "biseccion",
+  "newton-raphson",
+  "aitken-delta-cuadrado",
+  "interpolacion-lagrange",
+  "newton-diferencias-divididas",
+  "trapecio-simple",
+  "trapecio-compuesta",
+  "simpson-13-simple",
+  "simpson-13-compuesta",
+  "simpson-38-simple",
+  "simpson-38-compuesta",
+  "regla-rectangulo",
+  "monte-carlo-simple",
+  "monte-carlo-doble",
+  "euler",
+  "heun-euler-mejorado",
+  "runge-kutta-4"
+]
+

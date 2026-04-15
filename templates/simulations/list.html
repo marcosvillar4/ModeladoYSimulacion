@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+
+{% block title %}Simulaciones{% endblock %}
+
+{% block content %}
+<section>
+    <h2>Simulaciones disponibles</h2>
+    <div class="cards">
+        {% for simulation in simulations %}
+            <article class="card">
+                <h3>{{ simulation.title|render_math_text }}</h3>
+                <p>{{ simulation.description|render_math_text }}</p>
+                <a class="button" href="{% url 'simulations:run' slug=simulation.slug %}">Configurar</a>
+            </article>
+        {% empty %}
+            <p>No hay simulaciones registradas.</p>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}
+
