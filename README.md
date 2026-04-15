@@ -1,3 +1,5 @@
+# APLICACION VIBECODEADA, DUDAR DE TODO, NO REPRESENTA PROGRAMACION USUAL
+
 # Modelado y Simulacion con Django
 
 MVP web para ejecutar scripts de modelado/simulacion desde una interfaz con subpaginas, entrada de funciones matematicas y visualizacion de graficos.
