@@ -107,6 +107,30 @@ td {
     margin-bottom: 1rem;
 }
 
+.chart-panzoom-frame {
+    overflow: hidden;
+    border: 1px solid #d1d5db;
+    border-radius: 0.4rem;
+    margin-bottom: 1rem;
+    background: #fff;
+}
+
+.chart-panzoom-frame > .chart {
+    border: 0;
+    border-radius: 0;
+    margin-bottom: 0;
+    display: block;
+    transform-origin: 0 0;
+    will-change: transform;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+}
+
+.chart-panzoom-frame > .chart.is-dragging {
+    cursor: grabbing;
+}
+
 .messages {
     list-style: none;
     padding: 0;

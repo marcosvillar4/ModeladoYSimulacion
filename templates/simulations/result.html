@@ -4,6 +4,7 @@
 
 {% block content %}
 <section>
+    <script>{{ plotly_js|safe }}</script>
     <h2>{{ payload.result.title|render_math_text }}</h2>
     <p>{{ payload.result.description|render_math_text }}</p>
 
@@ -41,7 +42,18 @@
     </table>
 
     <h3>Grafico</h3>
-    <img src="{{ payload.result.plot }}" alt="grafico de simulacion" class="chart">
+    <div class="chart">{{ payload.result.plot|safe }}</div>
+
+    {% if payload.result.auxiliary_plots %}
+        <h3>Figuras auxiliares</h3>
+        {% for item in payload.result.auxiliary_plots %}
+            <h4>{{ item.title|render_math_text }}</h4>
+            {% if item.note %}
+                <p>{{ item.note|render_math_text }}</p>
+            {% endif %}
+            <div class="chart">{{ item.plot|safe }}</div>
+        {% endfor %}
+    {% endif %}
 
     <h3>Muestra de resultados</h3>
     <table>

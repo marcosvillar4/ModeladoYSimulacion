@@ -1,9 +1,5 @@
-import base64
-import io
-
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 from sympy import Abs, E, Float, Integer, Rational, Symbol, cos, exp, log, pi, sin, sqrt, tan
 from sympy.parsing.sympy_parser import (
     convert_xor,
@@ -16,8 +12,6 @@ from sympy.utilities.lambdify import lambdify
 from .mathlatex import normalize_latex_expression
 from .registry import ExpressionSpec, ParameterSpec, SimulationSpec, register_spec
 
-matplotlib.use("Agg")
-
 _ALLOWED_SYMBOLS = {
     "sin": sin,
     "cos": cos,
@@ -28,6 +22,20 @@ _ALLOWED_SYMBOLS = {
     "abs": Abs,
     "pi": pi,
     "E": E,
+}
+
+_FUNCTION_COLOR = "#0f172a"
+_FUNCTION_WIDTH = 2.6
+_AUX_FILL_COLOR = "#22c55e"
+_AUX_FILL_ALPHA = 0.20
+_AUX_EDGE_COLOR = "#15803d"
+_AUX_EDGE_WIDTH = 1.1
+_NODE_COLOR = "#b91c1c"
+_GRID_COLOR = "#94a3b8"
+_PLOTLY_CONFIG = {
+    "scrollZoom": True,
+    "displaylogo": False,
+    "responsive": True,
 }
 
 _DEFAULT_SEED_PARAM = ParameterSpec(
@@ -146,27 +154,202 @@ def _parse_points_csv(value: str, field_name: str) -> np.ndarray:
     return np.array(parsed, dtype=float)
 
 
+def _to_plotly_values(values) -> list:
+    if isinstance(values, np.ndarray):
+        return values.tolist()
+    return list(values)
+
+
+def _figure_to_html(fig: go.Figure) -> str:
+    fig.update_layout(
+        template="plotly_white",
+        margin={"l": 55, "r": 20, "t": 55, "b": 50},
+        dragmode="pan",
+    )
+    return fig.to_html(full_html=False, include_plotlyjs=False, config=_PLOTLY_CONFIG)
+
+
 def _line_plot(series: list[dict], title: str, x_label: str, y_label: str) -> str:
-    fig, ax = plt.subplots(figsize=(8, 4.2))
+    fig = go.Figure()
     for item in series:
         if item.get("style") == "scatter":
-            ax.scatter(item["x"], item["y"], label=item["name"], s=14, alpha=0.7)
+            fig.add_trace(
+                go.Scatter(
+                    x=_to_plotly_values(item["x"]),
+                    y=_to_plotly_values(item["y"]),
+                    mode="markers",
+                    name=item["name"],
+                    marker={"size": 6},
+                )
+            )
         else:
-            ax.plot(item["x"], item["y"], label=item["name"], linewidth=2)
+            fig.add_trace(
+                go.Scatter(
+                    x=_to_plotly_values(item["x"]),
+                    y=_to_plotly_values(item["y"]),
+                    mode="lines",
+                    name=item["name"],
+                    line={"width": 2.5},
+                )
+            )
 
-    ax.set_title(title)
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    if len(series) > 1:
-        ax.legend()
-    ax.grid(True, linestyle="--", alpha=0.3)
+    fig.update_layout(title=title, xaxis_title=x_label, yaxis_title=y_label)
+    fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    return _figure_to_html(fig)
 
-    image_buffer = io.BytesIO()
-    fig.tight_layout()
-    fig.savefig(image_buffer, format="png", dpi=120)
-    plt.close(fig)
-    encoded = base64.b64encode(image_buffer.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
+
+def _aux_plot_trapezoids(f, a: float, b: float, x_nodes: np.ndarray, title: str) -> str:
+    dense_x = np.linspace(a, b, 600)
+    dense_y = np.asarray(f(dense_x), dtype=float)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(dense_x),
+            y=_to_plotly_values(dense_y),
+            mode="lines",
+            name="f(x)",
+            line={"color": _FUNCTION_COLOR, "width": _FUNCTION_WIDTH},
+        )
+    )
+
+    y_nodes = np.asarray(f(x_nodes), dtype=float)
+    for idx, (left, right, y_left, y_right) in enumerate(zip(x_nodes[:-1], x_nodes[1:], y_nodes[:-1], y_nodes[1:])):
+        fig.add_trace(
+            go.Scatter(
+                x=[left, left, right, right, left],
+                y=[0.0, y_left, y_right, 0.0, 0.0],
+                fill="toself",
+                mode="lines",
+                line={"color": _AUX_EDGE_COLOR, "width": _AUX_EDGE_WIDTH},
+                fillcolor="rgba(34, 197, 94, 0.20)",
+                name="trapecios" if idx == 0 else None,
+                showlegend=idx == 0,
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(x_nodes),
+            y=_to_plotly_values(y_nodes),
+            mode="markers",
+            name="nodos",
+            marker={"size": 7, "color": _NODE_COLOR},
+        )
+    )
+    fig.update_layout(title=title, xaxis_title="x", yaxis_title="f(x)")
+    fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    return _figure_to_html(fig)
+
+
+def _aux_plot_rectangles_midpoint(f, a: float, b: float, n: int, title: str) -> str:
+    h = (b - a) / n
+    midpoints = a + (np.arange(n) + 0.5) * h
+    heights = np.asarray(f(midpoints), dtype=float)
+
+    dense_x = np.linspace(a, b, 600)
+    dense_y = np.asarray(f(dense_x), dtype=float)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(dense_x),
+            y=_to_plotly_values(dense_y),
+            mode="lines",
+            name="f(x)",
+            line={"color": _FUNCTION_COLOR, "width": _FUNCTION_WIDTH},
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=_to_plotly_values(midpoints),
+            y=_to_plotly_values(heights),
+            name="subrectangulos",
+            marker={"color": "rgba(34, 197, 94, 0.20)", "line": {"color": _AUX_EDGE_COLOR, "width": _AUX_EDGE_WIDTH}},
+            width=h,
+            opacity=1.0,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(midpoints),
+            y=_to_plotly_values(heights),
+            mode="markers",
+            name="puntos medios",
+            marker={"size": 7, "color": _NODE_COLOR},
+        )
+    )
+    fig.update_layout(title=title, xaxis_title="x", yaxis_title="f(x)", barmode="overlay")
+    fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    return _figure_to_html(fig)
+
+
+def _aux_plot_simpson_panels(
+    f,
+    a: float,
+    b: float,
+    x_nodes: np.ndarray,
+    panel_size: int,
+    title: str,
+) -> tuple[str, int]:
+    dense_x = np.linspace(a, b, 700)
+    dense_y = np.asarray(f(dense_x), dtype=float)
+    y_nodes = np.asarray(f(x_nodes), dtype=float)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(dense_x),
+            y=_to_plotly_values(dense_y),
+            mode="lines",
+            name="f(x)",
+            line={"color": _FUNCTION_COLOR, "width": _FUNCTION_WIDTH},
+        )
+    )
+
+    total_panels = (len(x_nodes) - 1) // panel_size
+    max_panels = min(total_panels, 24)
+    palette = ["#16a34a", "#0ea5e9", "#f59e0b", "#a855f7"]
+
+    for panel_idx in range(max_panels):
+        start = panel_idx * panel_size
+        end = start + panel_size + 1
+        panel_x = x_nodes[start:end]
+        panel_y = y_nodes[start:end]
+        coeffs = np.polyfit(panel_x, panel_y, deg=panel_size)
+        poly = np.poly1d(coeffs)
+        panel_dense_x = np.linspace(panel_x[0], panel_x[-1], 120)
+        panel_dense_y = poly(panel_dense_x)
+        color = palette[panel_idx % len(palette)]
+        fig.add_trace(
+            go.Scatter(
+                x=_to_plotly_values(panel_dense_x),
+                y=_to_plotly_values(panel_dense_y),
+                fill="tozeroy",
+                mode="lines",
+                line={"color": color, "width": 1.7},
+                opacity=0.25,
+                name="paneles" if panel_idx == 0 else None,
+                showlegend=panel_idx == 0,
+            )
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(x_nodes),
+            y=_to_plotly_values(y_nodes),
+            mode="markers",
+            name="nodos",
+            marker={"size": 7, "color": _NODE_COLOR},
+        )
+    )
+    fig.update_layout(title=title, xaxis_title="x", yaxis_title="f(x)")
+    fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    return _figure_to_html(fig), total_panels
 
 
 def _result_payload(
@@ -179,12 +362,15 @@ def _result_payload(
     y_label: str,
     table_headers: list[str],
     table_rows: list[list],
+    auxiliary_plots: list[dict] | None = None,
+    plot_image: str | None = None,
 ) -> dict:
     return {
         "title": title,
         "description": description,
         "summary": summary,
-        "plot": _line_plot(plot_series, plot_title, x_label, y_label),
+        "plot": plot_image or _line_plot(plot_series, plot_title, x_label, y_label),
+        "auxiliary_plots": auxiliary_plots or [],
         "table": {
             "headers": table_headers,
             "rows": table_rows[:25],
@@ -492,6 +678,7 @@ def _run_trapezoid_simple(data: dict) -> dict:
 
     grid = np.linspace(a, b, 250)
     y_grid = np.asarray(f(grid), dtype=float)
+    combined_plot = _aux_plot_trapezoids(f, a, b, np.array([a, b]), "Trapecio simple")
 
     return _result_payload(
         title="Resultado: Regla del trapecio simple",
@@ -506,6 +693,7 @@ def _run_trapezoid_simple(data: dict) -> dict:
         y_label="f(x)",
         table_headers=["x", "f(x)"],
         table_rows=[[a, fa], [b, fb]],
+        plot_image=combined_plot,
     )
 
 
@@ -518,6 +706,7 @@ def _run_trapezoid_composite(data: dict) -> dict:
     y = np.asarray(f(x), dtype=float)
     h = (b - a) / n
     integral = h * (0.5 * y[0] + np.sum(y[1:-1]) + 0.5 * y[-1])
+    combined_plot = _aux_plot_trapezoids(f, a, b, x, "Trapecio compuesto")
 
     return _result_payload(
         title="Resultado: Regla del trapecio compuesta",
@@ -532,6 +721,7 @@ def _run_trapezoid_composite(data: dict) -> dict:
         y_label="f(x)",
         table_headers=["i", "x_i", "f(x_i)"],
         table_rows=[[i, float(x[i]), float(y[i])] for i in range(len(x))],
+        plot_image=combined_plot,
     )
 
 
@@ -547,6 +737,14 @@ def _run_simpson_13_simple(data: dict) -> dict:
 
     grid = np.linspace(a, b, 250)
     y_grid = np.asarray(f(grid), dtype=float)
+    combined_plot, _ = _aux_plot_simpson_panels(
+        f,
+        a,
+        b,
+        np.array([a, m, b]),
+        panel_size=2,
+        title="Simpson 1/3 simple",
+    )
 
     return _result_payload(
         title="Resultado: Simpson 1/3 simple",
@@ -561,6 +759,7 @@ def _run_simpson_13_simple(data: dict) -> dict:
         y_label="f(x)",
         table_headers=["x", "f(x)"],
         table_rows=[[a, fa], [m, fm], [b, fb]],
+        plot_image=combined_plot,
     )
 
 
@@ -575,6 +774,14 @@ def _run_simpson_13_composite(data: dict) -> dict:
     y = np.asarray(f(x), dtype=float)
     h = (b - a) / n
     integral = (h / 3.0) * (y[0] + y[-1] + 4 * np.sum(y[1:-1:2]) + 2 * np.sum(y[2:-2:2]))
+    combined_plot, _ = _aux_plot_simpson_panels(
+        f,
+        a,
+        b,
+        x,
+        panel_size=2,
+        title="Simpson 1/3 compuesta",
+    )
 
     return _result_payload(
         title="Resultado: Simpson 1/3 compuesta",
@@ -589,6 +796,7 @@ def _run_simpson_13_composite(data: dict) -> dict:
         y_label="f(x)",
         table_headers=["i", "x_i", "f(x_i)"],
         table_rows=[[i, float(x[i]), float(y[i])] for i in range(len(x))],
+        plot_image=combined_plot,
     )
 
 
@@ -609,6 +817,14 @@ def _run_simpson_38_simple(data: dict) -> dict:
 
     grid = np.linspace(a, b, 250)
     y_grid = np.asarray(f(grid), dtype=float)
+    combined_plot, _ = _aux_plot_simpson_panels(
+        f,
+        a,
+        b,
+        np.array([x0, x1, x2, x3]),
+        panel_size=3,
+        title="Simpson 3/8 simple",
+    )
 
     return _result_payload(
         title="Resultado: Simpson 3/8 simple",
@@ -628,6 +844,7 @@ def _run_simpson_38_simple(data: dict) -> dict:
         y_label="f(x)",
         table_headers=["x", "f(x)"],
         table_rows=[[x0, y0], [x1, y1], [x2, y2], [x3, y3]],
+        plot_image=combined_plot,
     )
 
 
@@ -646,6 +863,14 @@ def _run_simpson_38_composite(data: dict) -> dict:
     sum_mult_3 = np.sum(y[(mask % 3) == 0])
     sum_not_mult_3 = np.sum(y[(mask % 3) != 0])
     integral = (3 * h / 8.0) * (y[0] + y[-1] + 2 * sum_mult_3 + 3 * sum_not_mult_3)
+    combined_plot, _ = _aux_plot_simpson_panels(
+        f,
+        a,
+        b,
+        x,
+        panel_size=3,
+        title="Simpson 3/8 compuesta",
+    )
 
     return _result_payload(
         title="Resultado: Simpson 3/8 compuesta",
@@ -660,6 +885,7 @@ def _run_simpson_38_composite(data: dict) -> dict:
         y_label="f(x)",
         table_headers=["i", "x_i", "f(x_i)"],
         table_rows=[[i, float(x[i]), float(y[i])] for i in range(len(x))],
+        plot_image=combined_plot,
     )
 
 
@@ -675,6 +901,7 @@ def _run_rectangle_rule(data: dict) -> dict:
 
     dense_x = np.linspace(a, b, 400)
     dense_y = np.asarray(f(dense_x), dtype=float)
+    combined_plot = _aux_plot_rectangles_midpoint(f, a, b, n, "Regla del rectangulo (punto medio)")
 
     return _result_payload(
         title="Resultado: Regla del rectangulo (punto medio)",
@@ -689,6 +916,7 @@ def _run_rectangle_rule(data: dict) -> dict:
         y_label="f(x)",
         table_headers=["i", "x_medio", "f(x_medio)"],
         table_rows=[[i + 1, float(midpoints[i]), float(f_mid[i])] for i in range(n)],
+        plot_image=combined_plot,
     )
 
 
@@ -775,7 +1003,6 @@ def _run_euler(data: dict) -> dict:
     y_current = float(data["y0"])
     h = _ensure_positive_step(data["h"])
     n = _ensure_positive_int(data["n"], "n")
-    seed = int(data["seed"])
 
     rows = []
     x_values = [x_current]
@@ -808,7 +1035,6 @@ def _run_euler(data: dict) -> dict:
             "x final": float(x_values[-1]),
             "y aproximado final": float(y_values[-1]),
             "error estimado final": float(rows[-1][5]) if rows else 0.0,
-            "semilla": seed,
         },
         plot_series=[
             {"name": "y_n", "x": np.array(x_values), "y": np.array(y_values), "style": "line"}
@@ -827,7 +1053,6 @@ def _run_heun(data: dict) -> dict:
     y_current = float(data["y0"])
     h = _ensure_positive_step(data["h"])
     n = _ensure_positive_int(data["n"], "n")
-    seed = int(data["seed"])
 
     rows = []
     x_values = [x_current]
@@ -856,7 +1081,6 @@ def _run_heun(data: dict) -> dict:
             "iteraciones": int(n),
             "x final": float(x_values[-1]),
             "y aproximado final": float(y_values[-1]),
-            "semilla": seed,
         },
         plot_series=[
             {"name": "y_n", "x": np.array(x_values), "y": np.array(y_values), "style": "line"}
@@ -875,7 +1099,6 @@ def _run_rk4(data: dict) -> dict:
     y_current = float(data["y0"])
     h = _ensure_positive_step(data["h"])
     n = _ensure_positive_int(data["n"], "n")
-    seed = int(data["seed"])
 
 
     rows = []
@@ -907,7 +1130,6 @@ def _run_rk4(data: dict) -> dict:
             "iteraciones": int(n),
             "x final": float(x_values[-1]),
             "y aproximado final": float(y_values[-1]),
-            "semilla": seed,
         },
         plot_series=[
             {"name": "y_n", "x": np.array(x_values), "y": np.array(y_values), "style": "line"}
@@ -936,7 +1158,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("x0", "Valor inicial x0", "float", 0.5),
                 ParameterSpec("tol", "Tolerancia", "float", 1e-6, 1e-12, 1.0),
                 ParameterSpec("max_iter", "Max iteraciones", "int", 100, 1, 10000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_fixed_point,
         )
@@ -955,7 +1176,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("b", "Extremo b", "float", 2.0),
                 ParameterSpec("tol", "Tolerancia", "float", 1e-6, 1e-12, 1.0),
                 ParameterSpec("max_iter", "Max iteraciones", "int", 100, 1, 10000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_bisection,
         )
@@ -974,7 +1194,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("x0", "Valor inicial x0", "float", 1.5),
                 ParameterSpec("tol", "Tolerancia", "float", 1e-6, 1e-12, 1.0),
                 ParameterSpec("max_iter", "Max iteraciones", "int", 100, 1, 10000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_newton_raphson,
         )
@@ -992,7 +1211,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("x0", "Valor inicial x0", "float", 0.5),
                 ParameterSpec("tol", "Tolerancia", "float", 1e-6, 1e-12, 1.0),
                 ParameterSpec("max_iter", "Max iteraciones", "int", 50, 1, 10000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_aitken_delta2,
         )
@@ -1021,7 +1239,6 @@ def register_default_simulations() -> None:
             ),
             parameters=(
                 ParameterSpec("x_eval", "x a evaluar", "float", 1.5),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_lagrange_interpolation,
         )
@@ -1038,7 +1255,6 @@ def register_default_simulations() -> None:
             ),
             parameters=(
                 ParameterSpec("x_eval", "x a evaluar", "float", 1.5),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_newton_divided_interpolation,
         )
@@ -1055,7 +1271,6 @@ def register_default_simulations() -> None:
             parameters=(
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_trapezoid_simple,
         )
@@ -1073,7 +1288,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("n", "Cantidad de subintervalos", "int", 12, 1, 100000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_trapezoid_composite,
         )
@@ -1090,7 +1304,6 @@ def register_default_simulations() -> None:
             parameters=(
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_simpson_13_simple,
         )
@@ -1108,7 +1321,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("n", "Cantidad de subintervalos (par)", "int", 12, 2, 100000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_simpson_13_composite,
         )
@@ -1125,7 +1337,6 @@ def register_default_simulations() -> None:
             parameters=(
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_simpson_38_simple,
         )
@@ -1143,7 +1354,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("n", "Cantidad de subintervalos (multiplo de 3)", "int", 12, 3, 100000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_simpson_38_composite,
         )
@@ -1161,7 +1371,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("n", "Cantidad de subintervalos", "int", 10, 1, 100000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_rectangle_rule,
         )
@@ -1224,7 +1433,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("y0", "Valor inicial y0", "float", 1.0),
                 ParameterSpec("h", "Paso h", "float", 0.1, 1e-6, 10.0),
                 ParameterSpec("n", "Cantidad de pasos", "int", 20, 1, 100000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_euler,
         )
@@ -1249,7 +1457,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("y0", "Valor inicial y0", "float", 1.0),
                 ParameterSpec("h", "Paso h", "float", 0.1, 1e-6, 10.0),
                 ParameterSpec("n", "Cantidad de pasos", "int", 20, 1, 100000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_heun,
         )
@@ -1274,7 +1481,6 @@ def register_default_simulations() -> None:
                 ParameterSpec("y0", "Valor inicial y0", "float", 1.0),
                 ParameterSpec("h", "Paso h", "float", 0.1, 1e-6, 10.0),
                 ParameterSpec("n", "Cantidad de pasos", "int", 20, 1, 100000),
-                _DEFAULT_SEED_PARAM,
             ),
             runner=_run_rk4,
         )

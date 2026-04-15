@@ -23,6 +23,15 @@ class SimulationsViewsTest(TestCase):
         self.assertContains(response, "vendor/mathjax/tex-svg.js")
         self.assertContains(response, "formula_preview.js")
 
+    def test_seed_field_only_for_stochastic_simulations(self):
+        deterministic_response = self.client.get(reverse("simulations:run", kwargs={"slug": "euler"}))
+        self.assertEqual(deterministic_response.status_code, 200)
+        self.assertNotContains(deterministic_response, 'name="seed"')
+
+        stochastic_response = self.client.get(reverse("simulations:run", kwargs={"slug": "monte-carlo-simple"}))
+        self.assertEqual(stochastic_response.status_code, 200)
+        self.assertContains(stochastic_response, 'name="seed"')
+
     def test_run_fixed_point_redirects_to_result(self):
         response = self.client.post(
             reverse("simulations:run", kwargs={"slug": "punto-fijo"}),
@@ -73,6 +82,7 @@ class SimulationsViewsTest(TestCase):
         self.assertContains(result_response, "Resultado: Metodo de Euler")
         self.assertContains(result_response, "error estimado")
         self.assertContains(result_response, "\\(x_n\\)")
+        self.assertContains(result_response, "plotly-graph-div")
 
     def test_run_rk4_with_invalid_expression_shows_error(self):
         response = self.client.post(
@@ -133,4 +143,35 @@ class SimulationsViewsTest(TestCase):
                 "runge-kutta-4",
             ],
         )
+
+    def test_integration_methods_render_in_single_chart(self):
+        runs_to_check = [
+            (
+                "trapecio-compuesta",
+                {"fx": "sin(x)", "a": 0.0, "b": 3.14159, "n": 6, "seed": 42, "precision": 6},
+            ),
+            (
+                "simpson-13-compuesta",
+                {"fx": "sin(x)", "a": 0.0, "b": 3.14159, "n": 6, "seed": 42, "precision": 6},
+            ),
+            (
+                "regla-rectangulo",
+                {"fx": "sin(x)", "a": 0.0, "b": 3.14159, "n": 8, "seed": 42, "precision": 6},
+            ),
+        ]
+
+        for slug, payload in runs_to_check:
+            response = self.client.post(reverse("simulations:run", kwargs={"slug": slug}), data=payload)
+            self.assertEqual(response.status_code, 302)
+
+            runs = self.client.session.get("simulation_runs", {})
+            self.assertTrue(runs)
+            stored_payload = runs[next(reversed(runs))]
+            aux_plots = stored_payload["result"].get("auxiliary_plots", [])
+            self.assertEqual(aux_plots, [])
+            self.assertIn("plotly-graph-div", str(stored_payload["result"]["plot"]))
+
+            result_response = self.client.get(response["Location"])
+            self.assertEqual(result_response.status_code, 200)
+            self.assertNotContains(result_response, "Figuras auxiliares")
 

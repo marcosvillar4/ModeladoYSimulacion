@@ -5,6 +5,7 @@ from django.http import Http404
 from django.shortcuts import redirect, render
 from django.views import View
 from django.views.generic import TemplateView
+from plotly.offline import get_plotlyjs
 
 from .forms import DynamicSimulationForm
 from .services import (
@@ -112,4 +113,5 @@ class SimulationResultView(TemplateView):
 
         context["expression_names"] = self._resolve_expression_names(payload)
         context["payload"] = payload
+        context["plotly_js"] = get_plotlyjs()
         return context

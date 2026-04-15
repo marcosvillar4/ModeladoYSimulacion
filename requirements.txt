@@ -1,5 +1,5 @@
 django==6.0.4
-matplotlib==3.10.8
 numpy==2.4.4
+plotly==6.0.1
 sympy==1.14.0
 
