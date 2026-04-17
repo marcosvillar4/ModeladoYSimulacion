@@ -1,8 +1,23 @@
+:root {
+    --bg: #0b1220;
+    --surface: #111a2e;
+    --surface-soft: #17233d;
+    --border: #2a3b5f;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --link: #7dd3fc;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --success-bg: #102a1f;
+    --success-border: #1f7a4f;
+    --error: #fca5a5;
+}
+
 body {
     margin: 0;
     font-family: Arial, sans-serif;
-    background: #f8f9fb;
-    color: #1f2937;
+    background: var(--bg);
+    color: var(--text);
 }
 
 .container {
@@ -18,18 +33,22 @@ nav {
 }
 
 a {
-    color: #1d4ed8;
+    color: var(--link);
 }
 
 .button {
     display: inline-block;
-    background: #1d4ed8;
+    background: var(--accent);
     color: #fff;
     text-decoration: none;
     border: 0;
     padding: 0.5rem 0.8rem;
     border-radius: 0.4rem;
     cursor: pointer;
+}
+
+.button:hover {
+    background: var(--accent-hover);
 }
 
 .cards {
@@ -39,8 +58,8 @@ a {
 }
 
 .card {
-    background: #fff;
-    border: 1px solid #d1d5db;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 0.6rem;
     padding: 1rem;
 }
@@ -54,14 +73,14 @@ a {
 .math-preview-wrap {
     margin-top: 0.4rem;
     padding: 0.75rem;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border);
     border-radius: 0.45rem;
-    background: #f9fafb;
+    background: var(--surface-soft);
 }
 
 .math-preview-label {
     font-size: 0.85rem;
-    color: #6b7280;
+    color: var(--muted);
     margin-bottom: 0.35rem;
 }
 
@@ -73,7 +92,7 @@ a {
 }
 
 .math-empty {
-    color: #9ca3af;
+    color: var(--muted);
     font-style: italic;
 }
 
@@ -82,37 +101,49 @@ input {
     width: 100%;
     box-sizing: border-box;
     padding: 0.45rem;
-    border: 1px solid #c4c9d4;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
     border-radius: 0.3rem;
+}
+
+input:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
     margin-bottom: 1rem;
-    background: #fff;
+    background: var(--surface);
 }
 
 th,
 td {
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border);
     padding: 0.4rem;
     text-align: left;
 }
 
+th {
+    background: var(--surface-soft);
+}
+
 .chart {
     width: 100%;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border);
     border-radius: 0.4rem;
     margin-bottom: 1rem;
+    background: var(--surface);
 }
 
 .chart-panzoom-frame {
     overflow: hidden;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border);
     border-radius: 0.4rem;
     margin-bottom: 1rem;
-    background: #fff;
+    background: var(--surface);
 }
 
 .chart-panzoom-frame > .chart {
@@ -137,8 +168,8 @@ td {
 }
 
 .message {
-    background: #dbeafe;
-    border: 1px solid #93c5fd;
+    background: var(--success-bg);
+    border: 1px solid var(--success-border);
     padding: 0.6rem;
     border-radius: 0.4rem;
     margin-bottom: 0.8rem;
@@ -146,7 +177,7 @@ td {
 
 .errorlist,
 .error-list {
-    color: #b91c1c;
+    color: var(--error);
     margin: 0.2rem 0;
 }
 

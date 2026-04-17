@@ -24,14 +24,14 @@ _ALLOWED_SYMBOLS = {
     "E": E,
 }
 
-_FUNCTION_COLOR = "#0f172a"
+_FUNCTION_COLOR = "#e2e8f0"
 _FUNCTION_WIDTH = 2.6
 _AUX_FILL_COLOR = "#22c55e"
 _AUX_FILL_ALPHA = 0.20
 _AUX_EDGE_COLOR = "#15803d"
 _AUX_EDGE_WIDTH = 1.1
-_NODE_COLOR = "#b91c1c"
-_GRID_COLOR = "#94a3b8"
+_NODE_COLOR = "#f97316"
+_GRID_COLOR = "#334155"
 _PLOTLY_CONFIG = {
     "scrollZoom": True,
     "displaylogo": False,
@@ -162,7 +162,10 @@ def _to_plotly_values(values) -> list:
 
 def _figure_to_html(fig: go.Figure) -> str:
     fig.update_layout(
-        template="plotly_white",
+        template="plotly_dark",
+        paper_bgcolor="#111a2e",
+        plot_bgcolor="#111a2e",
+        font={"color": "#e5e7eb"},
         margin={"l": 55, "r": 20, "t": 55, "b": 50},
         dragmode="pan",
     )
