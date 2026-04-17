@@ -1,5 +1,6 @@
 from django.test import TestCase
 from django.urls import reverse
+from unittest.mock import patch
 
 from .services import register_default_simulations
 
@@ -60,6 +61,45 @@ class SimulationsViewsTest(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No se pudo interpretar la expresion")
+
+    def test_run_bisection_renders_function_and_convergence_plot(self):
+        response = self.client.post(
+            reverse("simulations:run", kwargs={"slug": "biseccion"}),
+            data={"fx": "x**3 - x - 2", "a": 1, "b": 2, "tol": 1e-6, "max_iter": 20, "seed": 42, "precision": 6},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        runs = self.client.session.get("simulation_runs", {})
+        payload = runs[next(iter(runs))]
+        self.assertIn("plotly-graph-div", payload["result"]["plot"])
+        self.assertIn("Convergencia por iteracion", payload["result"]["plot"])
+        self.assertIn("|f(c_n)|", payload["result"]["plot"])
+        self.assertIn("|b_n-a_n|", payload["result"]["plot"])
+
+        aux_plots = payload["result"].get("auxiliary_plots", [])
+        self.assertEqual(len(aux_plots), 1)
+        self.assertEqual(aux_plots[0]["title"], "Funcion y intervalos de biseccion")
+        self.assertIn("plotly-graph-div", aux_plots[0]["plot"])
+        self.assertIn("scaleanchor", aux_plots[0]["plot"])
+
+        result_response = self.client.get(response["Location"])
+        self.assertEqual(result_response.status_code, 200)
+        self.assertContains(result_response, "Resultado: Metodo de biseccion")
+        self.assertContains(result_response, "Muestra de resultados")
+
+    def test_bisection_plot_uses_original_interval_bounds(self):
+        with patch("simulations.services._aux_plot_bisection_function", return_value="<div>mock plot</div>") as mocked_plot:
+            response = self.client.post(
+                reverse("simulations:run", kwargs={"slug": "biseccion"}),
+                data={"fx": "x**3 - x - 2", "a": 1, "b": 2, "tol": 1e-6, "max_iter": 20, "seed": 42, "precision": 6},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(mocked_plot.called)
+        _, plot_a, plot_b, _, plot_title = mocked_plot.call_args.args
+        self.assertEqual(plot_a, 1.0)
+        self.assertEqual(plot_b, 2.0)
+        self.assertEqual(plot_title, "Funcion y intervalos de biseccion")
 
     def test_run_euler_redirects_to_result(self):
         response = self.client.post(

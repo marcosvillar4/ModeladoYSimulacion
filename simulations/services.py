@@ -172,7 +172,13 @@ def _figure_to_html(fig: go.Figure) -> str:
     return fig.to_html(full_html=False, include_plotlyjs=False, config=_PLOTLY_CONFIG)
 
 
-def _line_plot(series: list[dict], title: str, x_label: str, y_label: str) -> str:
+def _line_plot(
+    series: list[dict],
+    title: str,
+    x_label: str,
+    y_label: str,
+    equal_aspect: bool = False,
+) -> str:
     fig = go.Figure()
     for item in series:
         if item.get("style") == "scatter":
@@ -182,7 +188,7 @@ def _line_plot(series: list[dict], title: str, x_label: str, y_label: str) -> st
                     y=_to_plotly_values(item["y"]),
                     mode="markers",
                     name=item["name"],
-                    marker={"size": 6},
+                    marker=item.get("marker", {"size": 6}),
                 )
             )
         else:
@@ -192,13 +198,15 @@ def _line_plot(series: list[dict], title: str, x_label: str, y_label: str) -> st
                     y=_to_plotly_values(item["y"]),
                     mode="lines",
                     name=item["name"],
-                    line={"width": 2.5},
+                    line=item.get("line", {"width": 2.5}),
                 )
             )
 
     fig.update_layout(title=title, xaxis_title=x_label, yaxis_title=y_label)
     fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
     fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    if equal_aspect:
+        fig.update_yaxes(scaleanchor="x", scaleratio=1)
     return _figure_to_html(fig)
 
 
@@ -287,6 +295,65 @@ def _aux_plot_rectangles_midpoint(f, a: float, b: float, n: int, title: str) -> 
     fig.update_layout(title=title, xaxis_title="x", yaxis_title="f(x)", barmode="overlay")
     fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
     fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    return _figure_to_html(fig)
+
+
+def _aux_plot_bisection_function(f, a: float, b: float, rows: list[list], title: str) -> str:
+    dense_x = np.linspace(a, b, 700)
+    dense_y = np.asarray(f(dense_x), dtype=float)
+
+    left_edges = np.array([row[1] for row in rows], dtype=float)
+    right_edges = np.array([row[2] for row in rows], dtype=float)
+    midpoints = np.array([row[3] for row in rows], dtype=float)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(dense_x),
+            y=_to_plotly_values(dense_y),
+            mode="lines",
+            name="f(x)",
+            line={"color": _FUNCTION_COLOR, "width": _FUNCTION_WIDTH},
+        )
+    )
+
+    interval_y = np.min(dense_y) - 0.08 * max(1.0, float(np.ptp(dense_y)))
+    if not np.isfinite(interval_y):
+        interval_y = -0.5
+
+    for idx, (left, right, midpoint) in enumerate(zip(left_edges, right_edges, midpoints), start=1):
+        fig.add_trace(
+            go.Scatter(
+                x=[left, right],
+                y=[interval_y, interval_y],
+                mode="lines",
+                line={"color": "rgba(34, 197, 94, 0.30)", "width": 2.2},
+                name="intervalos" if idx == 1 else None,
+                showlegend=idx == 1,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[midpoint],
+                y=[float(f(midpoint))],
+                mode="markers",
+                name="c_n" if idx == 1 else None,
+                showlegend=idx == 1,
+                marker={
+                    "size": 8,
+                    "color": _NODE_COLOR,
+                    "line": {"color": "#f8fafc", "width": 0.5},
+                },
+                text=[f"n={int(rows[idx - 1][0])}"],
+                hovertemplate="iteracion=%{text}<br>c_n=%{x:.6f}<br>f(c_n)=%{y:.6f}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(title=title, xaxis_title="x", yaxis_title="f(x)", legend={"orientation": "h", "yanchor": "bottom", "y": -0.18, "x": 0})
+    fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(scaleanchor="x", scaleratio=1)
     return _figure_to_html(fig)
 
 
@@ -422,6 +489,7 @@ def _run_fixed_point(data: dict) -> dict:
 def _run_bisection(data: dict) -> dict:
     f = _build_callable(data["fx"], variables=("x",))
     a, b = _ensure_interval(data["a"], data["b"])
+    plot_a, plot_b = a, b
     tol = float(data["tol"])
     max_iter = _ensure_positive_int(data["max_iter"], "max_iter")
 
@@ -450,6 +518,30 @@ def _run_bisection(data: dict) -> dict:
             a = c
             fa = fc
 
+    function_plot = _aux_plot_bisection_function(f, plot_a, plot_b, rows, "Funcion y intervalos de biseccion")
+    convergence_plot = _line_plot(
+        [
+            {
+                "name": "|f(c_n)|",
+                "x": np.arange(1, len(fmid_values) + 1),
+                "y": np.abs(np.array(fmid_values)),
+                "style": "line",
+                "line": {"color": "#38bdf8", "width": 2.4},
+            },
+            {
+                "name": "|b_n-a_n|",
+                "x": np.arange(1, len(rows) + 1),
+                "y": np.array([row[5] for row in rows], dtype=float),
+                "style": "line",
+                "line": {"color": "#f59e0b", "width": 2.0, "dash": "dot"},
+            },
+        ],
+        "Convergencia por iteracion",
+        "iteracion",
+        "error",
+        equal_aspect=True,
+    )
+
     return _result_payload(
         title="Resultado: Metodo de biseccion",
         description=f"Raiz de f(x) = {data['fx']}",
@@ -459,18 +551,21 @@ def _run_bisection(data: dict) -> dict:
             "|f(c)| final": float(abs(fmid_values[-1])),
         },
         plot_series=[
-            {
-                "name": "f(c_n)",
-                "x": np.arange(1, len(fmid_values) + 1),
-                "y": np.abs(np.array(fmid_values)),
-                "style": "line",
-            }
+            {"name": "|f(c_n)|", "x": np.arange(1, len(fmid_values) + 1), "y": np.abs(np.array(fmid_values)), "style": "line"}
         ],
-        plot_title="Error por iteracion en biseccion",
+        plot_title="Convergencia por iteracion",
         x_label="iteracion",
-        y_label="|f(c_n)|",
+        y_label="error",
         table_headers=["n", "a", "b", "c", "f(c)", "|b-a|"],
         table_rows=rows,
+        plot_image=convergence_plot,
+        auxiliary_plots=[
+            {
+                "title": "Funcion y intervalos de biseccion",
+                "note": "La escala inicial se fija 1:1 para respetar la geometria del intervalo.",
+                "plot": function_plot,
+            }
+        ],
     )
 
 
