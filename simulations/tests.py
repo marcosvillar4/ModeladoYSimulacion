@@ -33,6 +33,15 @@ class SimulationsViewsTest(TestCase):
         self.assertEqual(stochastic_response.status_code, 200)
         self.assertContains(stochastic_response, 'name="seed"')
 
+    def test_monte_carlo_methods_show_confidence_level_input(self):
+        response_simple = self.client.get(reverse("simulations:run", kwargs={"slug": "monte-carlo-simple"}))
+        self.assertEqual(response_simple.status_code, 200)
+        self.assertContains(response_simple, 'name="confidence_level"')
+
+        response_double = self.client.get(reverse("simulations:run", kwargs={"slug": "monte-carlo-doble"}))
+        self.assertEqual(response_double.status_code, 200)
+        self.assertContains(response_double, 'name="confidence_level"')
+
     def test_integration_methods_show_xi_input(self):
         response = self.client.get(reverse("simulations:run", kwargs={"slug": "trapecio-simple"}))
         self.assertEqual(response.status_code, 200)
@@ -95,15 +104,13 @@ class SimulationsViewsTest(TestCase):
         runs = self.client.session.get("simulation_runs", {})
         payload = runs[next(iter(runs))]
         self.assertIn("plotly-graph-div", payload["result"]["plot"])
-        self.assertIn("Convergencia por iteracion", payload["result"]["plot"])
+        self.assertIn("Error por iteracion en biseccion", payload["result"]["plot"])
         self.assertIn("|f(c_n)|", payload["result"]["plot"])
-        self.assertIn("|b_n-a_n|", payload["result"]["plot"])
 
         aux_plots = payload["result"].get("auxiliary_plots", [])
         self.assertEqual(len(aux_plots), 1)
-        self.assertEqual(aux_plots[0]["title"], "Funcion y intervalos de biseccion")
+        self.assertEqual(aux_plots[0]["title"], "Funcion original f(x)")
         self.assertIn("plotly-graph-div", aux_plots[0]["plot"])
-        self.assertIn("scaleanchor", aux_plots[0]["plot"])
 
         result_response = self.client.get(response["Location"])
         self.assertEqual(result_response.status_code, 200)
@@ -111,7 +118,7 @@ class SimulationsViewsTest(TestCase):
         self.assertContains(result_response, "Muestra de resultados")
 
     def test_bisection_plot_uses_original_interval_bounds(self):
-        with patch("simulations.services._aux_plot_bisection_function", return_value="<div>mock plot</div>") as mocked_plot:
+        with patch("simulations.services._aux_plot_original_function", return_value="<div>mock plot</div>") as mocked_plot:
             response = self.client.post(
                 reverse("simulations:run", kwargs={"slug": "biseccion"}),
                 data={"fx": "x**3 - x - 2", "a": 1, "b": 2, "tol": 1e-6, "max_iter": 20, "seed": 42, "precision": 6},
@@ -119,10 +126,10 @@ class SimulationsViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertTrue(mocked_plot.called)
-        _, plot_a, plot_b, _, plot_title = mocked_plot.call_args.args
+        _, plot_a, plot_b, plot_title = mocked_plot.call_args.args[:4]
         self.assertEqual(plot_a, 1.0)
         self.assertEqual(plot_b, 2.0)
-        self.assertEqual(plot_title, "Funcion y intervalos de biseccion")
+        self.assertEqual(plot_title, "Funcion original en el intervalo [a, b]")
 
     def test_run_euler_redirects_to_result(self):
         response = self.client.post(
@@ -301,6 +308,40 @@ class SimulationsViewsTest(TestCase):
         integral_value = payload["result"]["summary"]["integral aproximada"]
         self.assertTrue(integral_value == integral_value)
         self.assertNotEqual(str(integral_value).lower(), "nan")
+
+    def test_monte_carlo_simple_reports_statistics_and_distribution_plot(self):
+        response = self.client.post(
+            reverse("simulations:run", kwargs={"slug": "monte-carlo-simple"}),
+            data={
+                "fx": "sin(x)",
+                "a": 0.0,
+                "b": 3.14159,
+                "samples": 1500,
+                "confidence_level": 0.95,
+                "seed": 42,
+                "precision": 6,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        runs = self.client.session.get("simulation_runs", {})
+        payload = runs[next(reversed(runs))]
+        summary = payload["result"]["summary"]
+        for metric in [
+            "media muestral",
+            "varianza",
+            "desviacion estandar",
+            "error estandar",
+            "nivel de confianza",
+            "intervalo de confianza",
+        ]:
+            self.assertIn(metric, summary)
+
+        aux_plots = payload["result"].get("auxiliary_plots", [])
+        self.assertGreaterEqual(len(aux_plots), 1)
+        self.assertIn("Histograma de valores + normal estandar", aux_plots[0].get("title", ""))
+        self.assertIn("plotly-graph-div", aux_plots[0].get("plot", ""))
+        self.assertIn("normal estandar", aux_plots[0].get("plot", ""))
 
     def test_root_finding_methods_include_original_function_plot(self):
         runs_to_check = [

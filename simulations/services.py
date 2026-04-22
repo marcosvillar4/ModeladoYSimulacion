@@ -1,5 +1,6 @@
 import numpy as np
 import plotly.graph_objects as go
+from statistics import NormalDist
 from sympy import Abs, E, Float, Integer, Rational, Symbol, cos, diff, exp, limit, log, pi, sin, sqrt, tan
 from sympy.parsing.sympy_parser import (
     convert_xor,
@@ -163,6 +164,46 @@ def _ensure_positive_step(value: float, field_name: str = "h") -> float:
     return step
 
 
+def _ensure_confidence_level(value: float) -> float:
+    level = float(value)
+    if level <= 0.0 or level >= 1.0:
+        raise SimulationInputError("confidence_level debe estar entre 0 y 1 (exclusivo).")
+    return level
+
+
+def _monte_carlo_stats(values: np.ndarray, confidence_level: float, scale: float) -> dict:
+    if values.size == 0:
+        raise SimulationInputError("No hay muestras para calcular estadisticos de Monte Carlo.")
+
+    if not np.all(np.isfinite(values)):
+        raise SimulationInputError("Se detectaron valores no finitos en las muestras de Monte Carlo.")
+
+    n = int(values.size)
+    mean = float(np.mean(values))
+    variance = float(np.var(values, ddof=1)) if n > 1 else 0.0
+    std_dev = float(np.sqrt(max(variance, 0.0)))
+    std_error = float(std_dev / np.sqrt(n))
+    z_score = float(NormalDist().inv_cdf(0.5 * (1.0 + confidence_level)))
+    ci_half_width = z_score * std_error
+
+    integral_estimate = float(scale * mean)
+    integral_std_error = float(abs(scale) * std_error)
+    integral_ci_low = float(integral_estimate - z_score * integral_std_error)
+    integral_ci_high = float(integral_estimate + z_score * integral_std_error)
+
+    return {
+        "n": n,
+        "mean": mean,
+        "variance": variance,
+        "std_dev": std_dev,
+        "std_error": std_error,
+        "z_score": z_score,
+        "integral_estimate": integral_estimate,
+        "integral_ci_low": integral_ci_low,
+        "integral_ci_high": integral_ci_high,
+    }
+
+
 def _normalize_precision(cleaned_data: dict) -> int:
     raw_value = cleaned_data.get("precision", 6)
     try:
@@ -252,6 +293,49 @@ def _line_plot(series: list[dict], title: str, x_label: str, y_label: str) -> st
             )
 
     fig.update_layout(title=title, xaxis_title=x_label, yaxis_title=y_label)
+    fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    return _figure_to_html(fig)
+
+
+def _aux_plot_distribution_with_standard_normal(values: np.ndarray, title: str, x_label: str) -> str:
+    sample_values = np.asarray(values, dtype=float)
+    finite_values = sample_values[np.isfinite(sample_values)]
+    if finite_values.size == 0:
+        raise SimulationInputError("No hay valores finitos para construir la distribucion.")
+
+    mean = float(np.mean(finite_values))
+    std_dev = float(np.std(finite_values, ddof=1)) if finite_values.size > 1 else 0.0
+    if std_dev > 0.0:
+        z_values = (finite_values - mean) / std_dev
+    else:
+        z_values = np.zeros_like(finite_values, dtype=float)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Histogram(
+            x=_to_plotly_values(z_values),
+            histnorm="probability density",
+            nbinsx=40,
+            name="histograma estandarizado",
+            marker={"color": "rgba(56, 189, 248, 0.55)", "line": {"color": "#0ea5e9", "width": 1}},
+            opacity=0.85,
+        )
+    )
+
+    normal_x = np.linspace(-4.0, 4.0, 400)
+    normal_pdf = (1.0 / np.sqrt(2.0 * np.pi)) * np.exp(-0.5 * (normal_x ** 2))
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(normal_x),
+            y=_to_plotly_values(normal_pdf),
+            mode="lines",
+            name="normal estandar",
+            line={"color": "#f97316", "width": 2.6},
+        )
+    )
+
+    fig.update_layout(title=title, xaxis_title=x_label, yaxis_title="densidad")
     fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
     fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
     return _figure_to_html(fig)
@@ -1339,15 +1423,21 @@ def _run_monte_carlo_simple(data: dict) -> dict:
     a, b = _ensure_interval(data["a"], data["b"])
     samples = _ensure_positive_int(data["samples"], "samples")
     seed = int(data["seed"])
+    confidence_level = _ensure_confidence_level(data.get("confidence_level", 0.95))
 
     rng = np.random.default_rng(seed)
     x_samples = rng.uniform(a, b, samples)
     y_samples = np.asarray(f(x_samples), dtype=float)
-
-    integral = (b - a) * float(np.mean(y_samples))
+    stats = _monte_carlo_stats(y_samples, confidence_level, scale=(b - a))
+    integral = stats["integral_estimate"]
 
     dense_x = np.linspace(a, b, 300)
-    dense_y = np.asarray(f(dense_x), dtype=float)
+    dense_y = _safe_evaluate_univariate(data["fx"], dense_x)
+    value_distribution_plot = _aux_plot_distribution_with_standard_normal(
+        y_samples,
+        "Distribucion de valores y normal estandar",
+        "z",
+    )
 
     return _result_payload(
         title="Resultado: Integracion Monte Carlo simple",
@@ -1356,6 +1446,12 @@ def _run_monte_carlo_simple(data: dict) -> dict:
             "integral aproximada": float(integral),
             "muestras": int(samples),
             "semilla": seed,
+            "media muestral": stats["mean"],
+            "varianza": stats["variance"],
+            "desviacion estandar": stats["std_dev"],
+            "error estandar": stats["std_error"],
+            "nivel de confianza": confidence_level,
+            "intervalo de confianza": f"[{stats['integral_ci_low']}, {stats['integral_ci_high']}]",
         },
         plot_series=[
             {"name": "f(x)", "x": dense_x, "y": dense_y, "style": "line"},
@@ -1366,6 +1462,12 @@ def _run_monte_carlo_simple(data: dict) -> dict:
         y_label="f(x)",
         table_headers=["x_i", "f(x_i)"],
         table_rows=[[float(x_samples[i]), float(y_samples[i])] for i in range(min(40, samples))],
+        auxiliary_plots=[
+            {
+                "title": "Histograma de valores + normal estandar",
+                "plot": value_distribution_plot,
+            }
+        ],
     )
 
 
@@ -1375,6 +1477,7 @@ def _run_monte_carlo_double(data: dict) -> dict:
     ay, by = _ensure_interval(data["ay"], data["by"])
     samples = _ensure_positive_int(data["samples"], "samples")
     seed = int(data["seed"])
+    confidence_level = _ensure_confidence_level(data.get("confidence_level", 0.95))
 
     rng = np.random.default_rng(seed)
     x_samples = rng.uniform(ax, bx, samples)
@@ -1382,7 +1485,13 @@ def _run_monte_carlo_double(data: dict) -> dict:
     f_samples = np.asarray(f(x_samples, y_samples), dtype=float)
 
     area = (bx - ax) * (by - ay)
-    integral = area * float(np.mean(f_samples))
+    stats = _monte_carlo_stats(f_samples, confidence_level, scale=area)
+    integral = stats["integral_estimate"]
+    value_distribution_plot = _aux_plot_distribution_with_standard_normal(
+        f_samples,
+        "Distribucion de valores y normal estandar",
+        "z",
+    )
 
     return _result_payload(
         title="Resultado: Integracion Monte Carlo doble",
@@ -1391,6 +1500,12 @@ def _run_monte_carlo_double(data: dict) -> dict:
             "integral aproximada": float(integral),
             "muestras": int(samples),
             "semilla": seed,
+            "media muestral": stats["mean"],
+            "varianza": stats["variance"],
+            "desviacion estandar": stats["std_dev"],
+            "error estandar": stats["std_error"],
+            "nivel de confianza": confidence_level,
+            "intervalo de confianza": f"[{stats['integral_ci_low']}, {stats['integral_ci_high']}]",
         },
         plot_series=[
             {
@@ -1407,6 +1522,12 @@ def _run_monte_carlo_double(data: dict) -> dict:
         table_rows=[
             [float(x_samples[i]), float(y_samples[i]), float(f_samples[i])]
             for i in range(min(40, samples))
+        ],
+        auxiliary_plots=[
+            {
+                "title": "Histograma de valores + normal estandar",
+                "plot": value_distribution_plot,
+            }
         ],
     )
 
@@ -1811,6 +1932,15 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("samples", "Cantidad de muestras", "int", 5000, 10, 1_000_000),
+                ParameterSpec(
+                    "confidence_level",
+                    "Nivel de confianza (0-1)",
+                    "float",
+                    0.95,
+                    0.5,
+                    0.999,
+                    "Ejemplos: 0.90, 0.95, 0.99",
+                ),
                 _DEFAULT_SEED_PARAM,
             ),
             runner=_run_monte_carlo_simple,
@@ -1831,6 +1961,15 @@ def register_default_simulations() -> None:
                 ParameterSpec("ay", "Limite inferior y", "float", 0.0),
                 ParameterSpec("by", "Limite superior y", "float", 1.0),
                 ParameterSpec("samples", "Cantidad de muestras", "int", 7000, 10, 1_000_000),
+                ParameterSpec(
+                    "confidence_level",
+                    "Nivel de confianza (0-1)",
+                    "float",
+                    0.95,
+                    0.5,
+                    0.999,
+                    "Ejemplos: 0.90, 0.95, 0.99",
+                ),
                 _DEFAULT_SEED_PARAM,
             ),
             runner=_run_monte_carlo_double,
