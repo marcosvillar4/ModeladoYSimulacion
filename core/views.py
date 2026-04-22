@@ -7,3 +7,8 @@ class HomeView(TemplateView):
 
 class AboutView(TemplateView):
     template_name = "core/about.html"
+
+
+class MathJaxReferenceView(TemplateView):
+    template_name = "core/mathjax_reference.html"
+

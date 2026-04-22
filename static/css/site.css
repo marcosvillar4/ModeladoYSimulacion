@@ -167,6 +167,23 @@ th {
     padding: 0;
 }
 
+.math-ref-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.math-ref-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 1rem;
+}
+
+.math-ref-card code {
+    color: #c4b5fd;
+}
+
 .message {
     background: var(--success-bg);
     border: 1px solid var(--success-border);

@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+
+{% block title %}Referencia MathJax - Modelado y Simulacion{% endblock %}
+
+{% block content %}
+<section>
+    <h2>Referencia MathJax (offline)</h2>
+    <p>
+        Esta pagina usa solo recursos locales del proyecto.
+        No depende de CDN ni de internet para renderizar formulas.
+    </p>
+</section>
+
+<section class="math-ref-grid">
+    <article class="math-ref-card">
+        <h3>Fracciones y potencias</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Sintaxis</th>
+                    <th>Vista</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>\\frac{1}{2}x</code></td>
+                    <td>\(\frac{1}{2}x\)</td>
+                </tr>
+                <tr>
+                    <td><code>x^2 + 3x + 1</code></td>
+                    <td>\(x^2 + 3x + 1\)</td>
+                </tr>
+                <tr>
+                    <td><code>x^{n+1}</code></td>
+                    <td>\(x^{n+1}\)</td>
+                </tr>
+            </tbody>
+        </table>
+    </article>
+
+    <article class="math-ref-card">
+        <h3>Raices y funciones</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Sintaxis</th>
+                    <th>Vista</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>\\sqrt{x}</code></td>
+                    <td>\(\sqrt{x}\)</td>
+                </tr>
+                <tr>
+                    <td><code>\\sin(x) + \\cos(x)</code></td>
+                    <td>\(\sin(x) + \cos(x)\)</td>
+                </tr>
+                <tr>
+                    <td><code>e^{-x}\\sin(x)</code></td>
+                    <td>\(e^{-x}\sin(x)\)</td>
+                </tr>
+            </tbody>
+        </table>
+    </article>
+
+    <article class="math-ref-card">
+        <h3>Derivadas e integrales</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Sintaxis</th>
+                    <th>Vista</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>\\frac{d}{dx}(x^2)</code></td>
+                    <td>\(\frac{d}{dx}(x^2)\)</td>
+                </tr>
+                <tr>
+                    <td><code>\\int_0^1 x^2 \\, dx</code></td>
+                    <td>\(\int_0^1 x^2 \, dx\)</td>
+                </tr>
+                <tr>
+                    <td><code>\\sum_{k=1}^{n} k</code></td>
+                    <td>\(\sum_{k=1}^{n} k\)</td>
+                </tr>
+            </tbody>
+        </table>
+    </article>
+
+    <article class="math-ref-card">
+        <h3>Consejos rapidos</h3>
+        <ul>
+            <li>Use variables simples como <code>x</code>, <code>y</code>.</li>
+            <li>Para multiplicacion implicita: <code>2x</code>, <code>xy</code>.</li>
+            <li>Para exponentes use <code>^</code> o llaves: <code>x^{10}</code>.</li>
+            <li>Para fracciones use <code>\\frac{a}{b}</code>.</li>
+            <li>Para raices use <code>\\sqrt{x}</code>.</li>
+        </ul>
+    </article>
+</section>
+{% endblock %}
+

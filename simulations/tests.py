@@ -32,10 +32,24 @@ class SimulationsViewsTest(TestCase):
         self.assertEqual(stochastic_response.status_code, 200)
         self.assertContains(stochastic_response, 'name="seed"')
 
+    def test_integration_methods_show_xi_input(self):
+        response = self.client.get(reverse("simulations:run", kwargs={"slug": "trapecio-simple"}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="xi"')
+
     def test_run_fixed_point_redirects_to_result(self):
         response = self.client.post(
             reverse("simulations:run", kwargs={"slug": "punto-fijo"}),
-            data={"gx": "cos(x)", "x0": 0.5, "tol": 1e-6, "max_iter": 50, "seed": 42, "precision": 6},
+            data={
+                "gx": "cos(x)",
+                "x0": 0.5,
+                "a": -0.5,
+                "b": 1.5,
+                "tol": 1e-6,
+                "max_iter": 50,
+                "seed": 42,
+                "precision": 6,
+            },
         )
         self.assertEqual(response.status_code, 302)
         redirect_url = response["Location"]
@@ -48,7 +62,16 @@ class SimulationsViewsTest(TestCase):
     def test_run_fixed_point_accepts_latex_like_input(self):
         response = self.client.post(
             reverse("simulations:run", kwargs={"slug": "punto-fijo"}),
-            data={"gx": r"\frac{1}{2}x", "x0": 2.0, "tol": 1e-6, "max_iter": 50, "seed": 42, "precision": 6},
+            data={
+                "gx": r"\frac{1}{2}x",
+                "x0": 2.0,
+                "a": 0.0,
+                "b": 2.5,
+                "tol": 1e-6,
+                "max_iter": 50,
+                "seed": 42,
+                "precision": 6,
+            },
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn("resultado", response["Location"])
@@ -148,15 +171,39 @@ class SimulationsViewsTest(TestCase):
         runs_to_check = [
             (
                 "trapecio-compuesta",
-                {"fx": "sin(x)", "a": 0.0, "b": 3.14159, "n": 6, "seed": 42, "precision": 6},
+                {
+                    "fx": "sin(x)",
+                    "a": 0.0,
+                    "b": 3.14159,
+                    "n": 6,
+                    "xi": 1.5707963267948966,
+                    "seed": 42,
+                    "precision": 6,
+                },
             ),
             (
                 "simpson-13-compuesta",
-                {"fx": "sin(x)", "a": 0.0, "b": 3.14159, "n": 6, "seed": 42, "precision": 6},
+                {
+                    "fx": "sin(x)",
+                    "a": 0.0,
+                    "b": 3.14159,
+                    "n": 6,
+                    "xi": 1.5707963267948966,
+                    "seed": 42,
+                    "precision": 6,
+                },
             ),
             (
                 "regla-rectangulo",
-                {"fx": "sin(x)", "a": 0.0, "b": 3.14159, "n": 8, "seed": 42, "precision": 6},
+                {
+                    "fx": "sin(x)",
+                    "a": 0.0,
+                    "b": 3.14159,
+                    "n": 8,
+                    "xi": 1.5707963267948966,
+                    "seed": 42,
+                    "precision": 6,
+                },
             ),
         ]
 
@@ -174,4 +221,82 @@ class SimulationsViewsTest(TestCase):
             result_response = self.client.get(response["Location"])
             self.assertEqual(result_response.status_code, 200)
             self.assertNotContains(result_response, "Figuras auxiliares")
+
+    def test_truncation_error_is_reported_for_integration_methods(self):
+        response = self.client.post(
+            reverse("simulations:run", kwargs={"slug": "trapecio-simple"}),
+            data={
+                "fx": "sin(x)",
+                "a": 0.0,
+                "b": 3.14159,
+                "xi": 1.5707963267948966,
+                "seed": 42,
+                "precision": 6,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        result_response = self.client.get(response["Location"])
+        self.assertEqual(result_response.status_code, 200)
+        self.assertContains(result_response, "error de truncamiento")
+        self.assertContains(result_response, "xi")
+
+    def test_composite_trapezoid_handles_removable_singularity(self):
+        response = self.client.post(
+            reverse("simulations:run", kwargs={"slug": "trapecio-compuesta"}),
+            data={
+                "fx": r"\ln(x+1)/x",
+                "a": 0.0,
+                "b": 1.0,
+                "n": 4,
+                "xi": 0.5,
+                "seed": 42,
+                "precision": 6,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        runs = self.client.session.get("simulation_runs", {})
+        payload = runs[next(reversed(runs))]
+        integral_value = payload["result"]["summary"]["integral aproximada"]
+        self.assertTrue(integral_value == integral_value)
+        self.assertNotEqual(str(integral_value).lower(), "nan")
+
+    def test_root_finding_methods_include_original_function_plot(self):
+        runs_to_check = [
+            (
+                "biseccion",
+                {"fx": "x**3 - x - 2", "a": 1.0, "b": 2.0, "tol": 1e-6, "max_iter": 50, "precision": 6},
+            ),
+            (
+                "newton-raphson",
+                {
+                    "fx": "x**3 - x - 2",
+                    "dfx": "3*x**2 - 1",
+                    "x0": 1.5,
+                    "tol": 1e-6,
+                    "max_iter": 50,
+                    "precision": 6,
+                },
+            ),
+            (
+                "aitken-delta-cuadrado",
+                {"gx": "cos(x)", "x0": 0.5, "tol": 1e-6, "max_iter": 50, "precision": 6},
+            ),
+        ]
+
+        for slug, payload in runs_to_check:
+            response = self.client.post(reverse("simulations:run", kwargs={"slug": slug}), data=payload)
+            self.assertEqual(response.status_code, 302)
+
+            runs = self.client.session.get("simulation_runs", {})
+            self.assertTrue(runs)
+            stored_payload = runs[next(reversed(runs))]
+            aux_plots = stored_payload["result"].get("auxiliary_plots", [])
+            self.assertGreaterEqual(len(aux_plots), 1)
+            self.assertIn("plotly-graph-div", str(aux_plots[0].get("plot", "")))
+
+            result_response = self.client.get(response["Location"])
+            self.assertEqual(result_response.status_code, 200)
+            self.assertContains(result_response, "Figuras auxiliares")
 

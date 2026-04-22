@@ -1,6 +1,6 @@
 import numpy as np
 import plotly.graph_objects as go
-from sympy import Abs, E, Float, Integer, Rational, Symbol, cos, exp, log, pi, sin, sqrt, tan
+from sympy import Abs, E, Float, Integer, Rational, Symbol, cos, diff, exp, limit, log, pi, sin, sqrt, tan
 from sympy.parsing.sympy_parser import (
     convert_xor,
     implicit_multiplication_application,
@@ -54,6 +54,19 @@ class SimulationInputError(ValueError):
 
 
 def _build_callable(expression: str, variables: tuple[str, ...]):
+    parsed, local_scope = _build_symbolic_expression(expression, variables)
+
+    allowed_free_symbols = {local_scope[name] for name in variables}
+    if not parsed.free_symbols.issubset(allowed_free_symbols):
+        raise SimulationInputError(
+            f"La expresion '{expression}' contiene simbolos no permitidos."
+        )
+
+    ordered_symbols = tuple(local_scope[name] for name in variables)
+    return lambdify(ordered_symbols, parsed, modules=["numpy"])
+
+
+def _build_symbolic_expression(expression: str, variables: tuple[str, ...]):
     local_scope = {name: Symbol(name) for name in variables}
     local_scope.update(_ALLOWED_SYMBOLS)
 
@@ -76,14 +89,49 @@ def _build_callable(expression: str, variables: tuple[str, ...]):
     except Exception as exc:
         raise SimulationInputError(f"No se pudo interpretar la expresion '{expression}'.") from exc
 
-    allowed_free_symbols = {local_scope[name] for name in variables}
-    if not parsed.free_symbols.issubset(allowed_free_symbols):
-        raise SimulationInputError(
-            f"La expresion '{expression}' contiene simbolos no permitidos."
-        )
+    return parsed, local_scope
 
-    ordered_symbols = tuple(local_scope[name] for name in variables)
-    return lambdify(ordered_symbols, parsed, modules=["numpy"])
+
+def _safe_limit_value(parsed, symbol, x_value: float) -> float:
+    try:
+        limit_expr = limit(parsed, symbol, float(x_value))
+        limit_value = float(limit_expr.evalf())
+    except Exception:
+        return np.nan
+    return limit_value if np.isfinite(limit_value) else np.nan
+
+
+def _safe_evaluate_univariate(expression: str, x_values):
+    parsed, local_scope = _build_symbolic_expression(expression, ("x",))
+    symbol = local_scope["x"]
+    callable_fn = lambdify(symbol, parsed, modules=["numpy"])
+
+    x_array = np.asarray(x_values, dtype=float)
+    scalar_input = x_array.shape == ()
+    if scalar_input:
+        x_array = x_array.reshape(1)
+
+    try:
+        with np.errstate(all="ignore"):
+            raw_values = callable_fn(x_array)
+    except Exception:
+        with np.errstate(all="ignore"):
+            raw_values = np.array([callable_fn(float(value)) for value in x_array.flat], dtype=float).reshape(x_array.shape)
+
+    values = np.asarray(raw_values, dtype=float)
+    if values.shape != x_array.shape:
+        values = np.broadcast_to(values, x_array.shape).astype(float).copy()
+
+    mask = ~np.isfinite(values)
+    if np.any(mask):
+        values = values.copy()
+        for index in np.argwhere(mask):
+            index_tuple = tuple(index)
+            values[index_tuple] = _safe_limit_value(parsed, symbol, float(x_array[index_tuple]))
+
+    if scalar_input:
+        return float(values[0])
+    return values
 
 
 def _ensure_positive_int(value: int, field_name: str) -> int:
@@ -99,6 +147,13 @@ def _ensure_interval(a: float, b: float) -> tuple[float, float]:
     if b <= a:
         raise SimulationInputError("Se requiere b > a.")
     return a, b
+
+
+def _ensure_xi_in_interval(xi: float, a: float, b: float) -> float:
+    xi = float(xi)
+    if not (a <= xi <= b):
+        raise SimulationInputError("xi debe estar dentro del intervalo [a, b].")
+    return xi
 
 
 def _ensure_positive_step(value: float, field_name: str = "h") -> float:
@@ -202,9 +257,9 @@ def _line_plot(series: list[dict], title: str, x_label: str, y_label: str) -> st
     return _figure_to_html(fig)
 
 
-def _aux_plot_trapezoids(f, a: float, b: float, x_nodes: np.ndarray, title: str) -> str:
+def _aux_plot_trapezoids(f, a: float, b: float, x_nodes: np.ndarray, title: str, expression: str | None = None) -> str:
     dense_x = np.linspace(a, b, 600)
-    dense_y = np.asarray(f(dense_x), dtype=float)
+    dense_y = _safe_evaluate_univariate(expression, dense_x) if expression else np.asarray(f(dense_x), dtype=float)
 
     fig = go.Figure()
     fig.add_trace(
@@ -217,7 +272,7 @@ def _aux_plot_trapezoids(f, a: float, b: float, x_nodes: np.ndarray, title: str)
         )
     )
 
-    y_nodes = np.asarray(f(x_nodes), dtype=float)
+    y_nodes = _safe_evaluate_univariate(expression, x_nodes) if expression else np.asarray(f(x_nodes), dtype=float)
     for idx, (left, right, y_left, y_right) in enumerate(zip(x_nodes[:-1], x_nodes[1:], y_nodes[:-1], y_nodes[1:])):
         fig.add_trace(
             go.Scatter(
@@ -247,13 +302,13 @@ def _aux_plot_trapezoids(f, a: float, b: float, x_nodes: np.ndarray, title: str)
     return _figure_to_html(fig)
 
 
-def _aux_plot_rectangles_midpoint(f, a: float, b: float, n: int, title: str) -> str:
+def _aux_plot_rectangles_midpoint(f, a: float, b: float, n: int, title: str, expression: str | None = None) -> str:
     h = (b - a) / n
     midpoints = a + (np.arange(n) + 0.5) * h
-    heights = np.asarray(f(midpoints), dtype=float)
+    heights = _safe_evaluate_univariate(expression, midpoints) if expression else np.asarray(f(midpoints), dtype=float)
 
     dense_x = np.linspace(a, b, 600)
-    dense_y = np.asarray(f(dense_x), dtype=float)
+    dense_y = _safe_evaluate_univariate(expression, dense_x) if expression else np.asarray(f(dense_x), dtype=float)
 
     fig = go.Figure()
     fig.add_trace(
@@ -297,10 +352,11 @@ def _aux_plot_simpson_panels(
     x_nodes: np.ndarray,
     panel_size: int,
     title: str,
+    expression: str | None = None,
 ) -> tuple[str, int]:
     dense_x = np.linspace(a, b, 700)
-    dense_y = np.asarray(f(dense_x), dtype=float)
-    y_nodes = np.asarray(f(x_nodes), dtype=float)
+    dense_y = _safe_evaluate_univariate(expression, dense_x) if expression else np.asarray(f(dense_x), dtype=float)
+    y_nodes = _safe_evaluate_univariate(expression, x_nodes) if expression else np.asarray(f(x_nodes), dtype=float)
 
     fig = go.Figure()
     fig.add_trace(
@@ -381,11 +437,233 @@ def _result_payload(
     }
 
 
+def _suggest_plot_interval(points, margin_ratio: float = 0.2, min_span: float = 1.0) -> tuple[float, float]:
+    values = np.asarray(points, dtype=float)
+    finite_values = values[np.isfinite(values)]
+    if finite_values.size == 0:
+        return -1.0, 1.0
+
+    x_min = float(np.min(finite_values))
+    x_max = float(np.max(finite_values))
+    span = max(x_max - x_min, min_span)
+    margin = span * margin_ratio
+    return x_min - margin, x_max + margin
+
+
+def _aux_plot_original_function(
+    f,
+    a: float,
+    b: float,
+    title: str,
+    function_label: str = "f(x)",
+    x_points=None,
+    xi: float | None = None,
+    expression: str | None = None,
+) -> str:
+    a, b = _ensure_interval(a, b)
+    x_grid = np.linspace(a, b, 450)
+    y_grid = _safe_evaluate_univariate(expression, x_grid) if expression else np.asarray(f(x_grid), dtype=float)
+    y_grid = np.where(np.isfinite(y_grid), y_grid, np.nan)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(x_grid),
+            y=_to_plotly_values(y_grid),
+            mode="lines",
+            name=function_label,
+            line={"color": _FUNCTION_COLOR, "width": _FUNCTION_WIDTH},
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[a, b],
+            y=[0.0, 0.0],
+            mode="lines",
+            name="y = 0",
+            line={"color": "#64748b", "width": 1.2, "dash": "dash"},
+        )
+    )
+
+    if x_points is not None:
+        x_arr = np.asarray(x_points, dtype=float)
+        if x_arr.size > 0:
+            y_arr = _safe_evaluate_univariate(expression, x_arr) if expression else np.asarray(f(x_arr), dtype=float)
+            mask = np.isfinite(x_arr) & np.isfinite(y_arr)
+            if np.any(mask):
+                fig.add_trace(
+                    go.Scatter(
+                        x=_to_plotly_values(x_arr[mask]),
+                        y=_to_plotly_values(y_arr[mask]),
+                        mode="markers",
+                        name="iteraciones",
+                        marker={"size": 7, "color": _NODE_COLOR},
+                    )
+                )
+
+    if xi is not None and np.isfinite(float(xi)):
+        xi_value = float(xi)
+        yi_value = float(f(xi_value))
+        if np.isfinite(yi_value):
+            fig.add_trace(
+                go.Scatter(
+                    x=[xi_value],
+                    y=[yi_value],
+                    mode="markers",
+                    name="xi",
+                    marker={"size": 10, "color": "#f43f5e"},
+                )
+            )
+            fig.add_shape(
+                type="line",
+                x0=xi_value,
+                x1=xi_value,
+                y0=0.0,
+                y1=yi_value,
+                line={"color": "#f43f5e", "width": 1.2, "dash": "dot"},
+            )
+
+    fig.update_layout(title=title, xaxis_title="x", yaxis_title="y")
+    fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    return _figure_to_html(fig)
+
+
+def _truncation_error_from_xi(
+    expression: str,
+    xi: float,
+    derivative_order: int,
+    coefficient: float,
+    variables: tuple[str, ...] = ("x",),
+) -> tuple[float, float]:
+    if derivative_order < 1:
+        raise SimulationInputError("El orden de la derivada debe ser mayor a 0.")
+
+    parsed, local_scope = _build_symbolic_expression(expression, variables)
+    symbol = local_scope[variables[0]]
+    derivative_expr = parsed
+    for _ in range(derivative_order):
+        derivative_expr = diff(derivative_expr, symbol)
+
+    xi_value = float(xi)
+    derivative_value = float(derivative_expr.subs(symbol, xi_value))
+    if not np.isfinite(derivative_value):
+        raise SimulationInputError("No se pudo evaluar la derivada en xi.")
+
+    return coefficient * derivative_value, derivative_value
+
+
+def _integration_truncation_report(
+    expression: str,
+    xi: float | None,
+    a: float,
+    b: float,
+    derivative_order: int,
+    coefficient: float,
+    derivative_label: str,
+) -> dict:
+    xi_value = 0.5 * (a + b) if xi is None else _ensure_xi_in_interval(xi, a, b)
+    truncation_error, derivative_value = _truncation_error_from_xi(
+        expression,
+        xi_value,
+        derivative_order,
+        coefficient,
+    )
+    return {
+        "xi": xi_value,
+        derivative_label: derivative_value,
+        "error de truncamiento": truncation_error,
+    }
+
+def _aux_plot_fixed_point(g, a: float, b: float, iterations: list, title: str) -> str:
+    """Grafica g(x), y=x y las iteraciones como pasos."""
+    x_grid = np.linspace(a, b, 400)
+    y_g = np.asarray(g(x_grid), dtype=float)
+    y_line = x_grid  # y = x
+    
+    fig = go.Figure()
+    
+    # Gráfica de g(x)
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(x_grid),
+            y=_to_plotly_values(y_g),
+            mode="lines",
+            name="g(x)",
+            line={"color": _FUNCTION_COLOR, "width": _FUNCTION_WIDTH},
+        )
+    )
+    
+    # Línea y = x
+    fig.add_trace(
+        go.Scatter(
+            x=_to_plotly_values(x_grid),
+            y=_to_plotly_values(y_line),
+            mode="lines",
+            name="y = x",
+            line={"color": "#64748b", "width": 1.5, "dash": "dash"},
+        )
+    )
+    
+    # Dibujar iteraciones como pasos (escalera)
+    if len(iterations) > 0:
+        x_current = float(iterations[0][1])  # x0 (x_n inicial)
+        
+        step_x = [x_current]
+        step_y = [0.0]
+        
+        max_iterations_plot = min(len(iterations), 20)  # Limitar a 20 pasos visuales
+        
+        for idx in range(max_iterations_plot):
+            x_next = float(iterations[idx][2])  # x_n+1
+            
+            # Línea vertical de (x_n, x_n) a (x_n, g(x_n))
+            step_x.extend([x_current, x_current])
+            step_y.extend([x_current, x_next])
+            
+            # Línea horizontal de (x_n, g(x_n)) a (g(x_n), g(x_n))
+            step_x.extend([x_current, x_next])
+            step_y.extend([x_next, x_next])
+            
+            x_current = x_next
+        
+        fig.add_trace(
+            go.Scatter(
+                x=_to_plotly_values(step_x),
+                y=_to_plotly_values(step_y),
+                mode="lines",
+                name="iteraciones",
+                line={"color": _NODE_COLOR, "width": 1.8},
+            )
+        )
+        
+        # Marcar punto inicial
+        fig.add_trace(
+            go.Scatter(
+                x=[float(iterations[0][1])],
+                y=[0.0],
+                mode="markers",
+                name="x0",
+                marker={"size": 8, "color": "#22c55e"},
+            )
+        )
+    
+    fig.update_layout(title=title, xaxis_title="x", yaxis_title="y")
+    fig.update_xaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    fig.update_yaxes(showgrid=True, gridcolor=_GRID_COLOR)
+    return _figure_to_html(fig)
+
+
 def _run_fixed_point(data: dict) -> dict:
     g = _build_callable(data["gx"], variables=("x",))
     tol = float(data["tol"])
     max_iter = _ensure_positive_int(data["max_iter"], "max_iter")
     x_current = float(data["x0"])
+    
+    # Nuevo: intervalo para visualización
+    a = float(data.get("a", x_current - 1.0))
+    b = float(data.get("b", x_current + 1.0))
+    a, b = _ensure_interval(a, b)
 
     iterations = []
     for idx in range(1, max_iter + 1):
@@ -401,6 +679,17 @@ def _run_fixed_point(data: dict) -> dict:
 
     it = np.array([row[0] for row in iterations], dtype=float)
     xn = np.array([row[2] for row in iterations], dtype=float)
+    
+    # Gráfico de convergencia (iteración vs x_n)
+    convergence_plot = _line_plot(
+        [{"name": "x_n", "x": it, "y": xn, "style": "line"}],
+        "Convergencia de punto fijo",
+        "iteracion",
+        "x_n"
+    )
+    
+    # Gráfico de g(x), y=x e iteraciones
+    phase_plot = _aux_plot_fixed_point(g, a, b, iterations, "Metodo de punto fijo: g(x) vs y=x")
 
     return _result_payload(
         title="Resultado: Metodo de punto fijo",
@@ -409,6 +698,7 @@ def _run_fixed_point(data: dict) -> dict:
             "iteraciones": len(iterations),
             "aproximacion": float(xn[-1]),
             "error final": float(iterations[-1][3]),
+            "intervalo": f"[{a}, {b}]",
         },
         plot_series=[{"name": "x_n", "x": it, "y": xn, "style": "line"}],
         plot_title="Convergencia de punto fijo",
@@ -416,12 +706,17 @@ def _run_fixed_point(data: dict) -> dict:
         y_label="x_n",
         table_headers=["n", "x_n", "x_n+1", "error"],
         table_rows=iterations,
+        auxiliary_plots=[
+            {"title": "Fase del punto fijo", "plot": phase_plot},
+            {"title": "Convergencia", "plot": convergence_plot},
+        ],
     )
 
 
 def _run_bisection(data: dict) -> dict:
     f = _build_callable(data["fx"], variables=("x",))
     a, b = _ensure_interval(data["a"], data["b"])
+    plot_a, plot_b = a, b
     tol = float(data["tol"])
     max_iter = _ensure_positive_int(data["max_iter"], "max_iter")
 
@@ -450,6 +745,16 @@ def _run_bisection(data: dict) -> dict:
             a = c
             fa = fc
 
+    function_plot = _aux_plot_original_function(
+        f,
+        plot_a,
+        plot_b,
+        "Funcion original en el intervalo [a, b]",
+        function_label="f(x)",
+        x_points=midpoints,
+        expression=data["fx"],
+    )
+
     return _result_payload(
         title="Resultado: Metodo de biseccion",
         description=f"Raiz de f(x) = {data['fx']}",
@@ -471,6 +776,7 @@ def _run_bisection(data: dict) -> dict:
         y_label="|f(c_n)|",
         table_headers=["n", "a", "b", "c", "f(c)", "|b-a|"],
         table_rows=rows,
+        auxiliary_plots=[{"title": "Funcion original f(x)", "plot": function_plot}],
     )
 
 
@@ -499,6 +805,18 @@ def _run_newton_raphson(data: dict) -> dict:
 
     x_values = np.array([row[4] for row in rows], dtype=float)
 
+    x_for_plot = [rows[0][1]] + [row[4] for row in rows]
+    interval_a, interval_b = _suggest_plot_interval(x_for_plot)
+    function_plot = _aux_plot_original_function(
+        f,
+        interval_a,
+        interval_b,
+        "Funcion original f(x) y aproximaciones",
+        function_label="f(x)",
+        x_points=x_for_plot,
+        expression=data["fx"],
+    )
+
     return _result_payload(
         title="Resultado: Metodo de Newton-Raphson",
         description=f"Raiz de f(x) = {data['fx']}",
@@ -520,6 +838,7 @@ def _run_newton_raphson(data: dict) -> dict:
         y_label="x_n",
         table_headers=["n", "x_n", "f(x_n)", "f'(x_n)", "x_n+1", "error"],
         table_rows=rows,
+        auxiliary_plots=[{"title": "Funcion original f(x)", "plot": function_plot}],
     )
 
 
@@ -548,6 +867,20 @@ def _run_aitken_delta2(data: dict) -> dict:
 
     aitken_values = np.array([row[4] for row in rows], dtype=float)
 
+    x_candidates = [row[idx] for row in rows for idx in (1, 2, 3, 4)]
+    interval_a, interval_b = _suggest_plot_interval(x_candidates)
+    iterations_for_phase = [
+        [int(row[0]), float(row[1]), float(row[2]), abs(float(row[2]) - float(row[1]))]
+        for row in rows
+    ]
+    function_plot = _aux_plot_fixed_point(
+        g,
+        interval_a,
+        interval_b,
+        iterations_for_phase,
+        "Funcion original g(x) y y = x",
+    )
+
     return _result_payload(
         title="Resultado: Metodo delta cuadrado de Aitken",
         description=f"Aceleracion para la iteracion de g(x) = {data['gx']}",
@@ -569,6 +902,7 @@ def _run_aitken_delta2(data: dict) -> dict:
         y_label="x_hat_n",
         table_headers=["n", "x0", "x1", "x2", "x_hat", "error"],
         table_rows=rows,
+        auxiliary_plots=[{"title": "Funcion original g(x)", "plot": function_plot}],
     )
 
 
@@ -675,18 +1009,27 @@ def _run_newton_divided_interpolation(data: dict) -> dict:
 def _run_trapezoid_simple(data: dict) -> dict:
     f = _build_callable(data["fx"], variables=("x",))
     a, b = _ensure_interval(data["a"], data["b"])
-    fa = float(f(a))
-    fb = float(f(b))
+    fa = float(_safe_evaluate_univariate(data["fx"], a))
+    fb = float(_safe_evaluate_univariate(data["fx"], b))
     integral = (b - a) * (fa + fb) / 2.0
+    xi_report = _integration_truncation_report(
+        data["fx"],
+        data.get("xi", 0.5 * (a + b)),
+        a,
+        b,
+        2,
+        -((b - a) ** 3) / 12.0,
+        "f''(xi)",
+    )
 
     grid = np.linspace(a, b, 250)
-    y_grid = np.asarray(f(grid), dtype=float)
-    combined_plot = _aux_plot_trapezoids(f, a, b, np.array([a, b]), "Trapecio simple")
+    y_grid = _safe_evaluate_univariate(data["fx"], grid)
+    combined_plot = _aux_plot_trapezoids(f, a, b, np.array([a, b]), "Trapecio simple", expression=data["fx"])
 
     return _result_payload(
         title="Resultado: Regla del trapecio simple",
         description=f"Integral aproximada de f(x) = {data['fx']}",
-        summary={"integral aproximada": float(integral), "intervalo": f"[{a}, {b}]"},
+        summary={"integral aproximada": float(integral), "intervalo": f"[{a}, {b}]", **xi_report},
         plot_series=[
             {"name": "f(x)", "x": grid, "y": y_grid, "style": "line"},
             {"name": "extremos", "x": np.array([a, b]), "y": np.array([fa, fb]), "style": "scatter"},
@@ -704,17 +1047,26 @@ def _run_trapezoid_composite(data: dict) -> dict:
     f = _build_callable(data["fx"], variables=("x",))
     a, b = _ensure_interval(data["a"], data["b"])
     n = _ensure_positive_int(data["n"], "n")
+    h = (b - a) / n
+    xi_report = _integration_truncation_report(
+        data["fx"],
+        data.get("xi", 0.5 * (a + b)),
+        a,
+        b,
+        2,
+        -((b - a) * (h ** 2)) / 12.0,
+        "f''(xi)",
+    )
 
     x = np.linspace(a, b, n + 1)
-    y = np.asarray(f(x), dtype=float)
-    h = (b - a) / n
+    y = _safe_evaluate_univariate(data["fx"], x)
     integral = h * (0.5 * y[0] + np.sum(y[1:-1]) + 0.5 * y[-1])
-    combined_plot = _aux_plot_trapezoids(f, a, b, x, "Trapecio compuesto")
+    combined_plot = _aux_plot_trapezoids(f, a, b, x, "Trapecio compuesto", expression=data["fx"])
 
     return _result_payload(
         title="Resultado: Regla del trapecio compuesta",
         description=f"Integral aproximada de f(x) = {data['fx']}",
-        summary={"integral aproximada": float(integral), "subintervalos": int(n)},
+        summary={"integral aproximada": float(integral), "subintervalos": int(n), **xi_report},
         plot_series=[
             {"name": "f(x)", "x": x, "y": y, "style": "line"},
             {"name": "nodos", "x": x, "y": y, "style": "scatter"},
@@ -733,13 +1085,22 @@ def _run_simpson_13_simple(data: dict) -> dict:
     a, b = _ensure_interval(data["a"], data["b"])
     m = 0.5 * (a + b)
 
-    fa = float(f(a))
-    fm = float(f(m))
-    fb = float(f(b))
+    fa = float(_safe_evaluate_univariate(data["fx"], a))
+    fm = float(_safe_evaluate_univariate(data["fx"], m))
+    fb = float(_safe_evaluate_univariate(data["fx"], b))
     integral = (b - a) * (fa + 4 * fm + fb) / 6.0
+    xi_report = _integration_truncation_report(
+        data["fx"],
+        data.get("xi", 0.5 * (a + b)),
+        a,
+        b,
+        4,
+        -((b - a) ** 5) / 2880.0,
+        "f''''(xi)",
+    )
 
     grid = np.linspace(a, b, 250)
-    y_grid = np.asarray(f(grid), dtype=float)
+    y_grid = _safe_evaluate_univariate(data["fx"], grid)
     combined_plot, _ = _aux_plot_simpson_panels(
         f,
         a,
@@ -747,12 +1108,13 @@ def _run_simpson_13_simple(data: dict) -> dict:
         np.array([a, m, b]),
         panel_size=2,
         title="Simpson 1/3 simple",
+        expression=data["fx"],
     )
 
     return _result_payload(
         title="Resultado: Simpson 1/3 simple",
         description=f"Integral aproximada de f(x) = {data['fx']}",
-        summary={"integral aproximada": float(integral), "intervalo": f"[{a}, {b}]"},
+        summary={"integral aproximada": float(integral), "intervalo": f"[{a}, {b}]", **xi_report},
         plot_series=[
             {"name": "f(x)", "x": grid, "y": y_grid, "style": "line"},
             {"name": "nodos", "x": np.array([a, m, b]), "y": np.array([fa, fm, fb]), "style": "scatter"},
@@ -773,9 +1135,19 @@ def _run_simpson_13_composite(data: dict) -> dict:
     if n % 2 != 0:
         raise SimulationInputError("Para Simpson 1/3 compuesta, n debe ser par.")
 
-    x = np.linspace(a, b, n + 1)
-    y = np.asarray(f(x), dtype=float)
     h = (b - a) / n
+    xi_report = _integration_truncation_report(
+        data["fx"],
+        data.get("xi", 0.5 * (a + b)),
+        a,
+        b,
+        4,
+        -((b - a) * (h ** 4)) / 180.0,
+        "f''''(xi)",
+    )
+
+    x = np.linspace(a, b, n + 1)
+    y = _safe_evaluate_univariate(data["fx"], x)
     integral = (h / 3.0) * (y[0] + y[-1] + 4 * np.sum(y[1:-1:2]) + 2 * np.sum(y[2:-2:2]))
     combined_plot, _ = _aux_plot_simpson_panels(
         f,
@@ -784,12 +1156,13 @@ def _run_simpson_13_composite(data: dict) -> dict:
         x,
         panel_size=2,
         title="Simpson 1/3 compuesta",
+        expression=data["fx"],
     )
 
     return _result_payload(
         title="Resultado: Simpson 1/3 compuesta",
         description=f"Integral aproximada de f(x) = {data['fx']}",
-        summary={"integral aproximada": float(integral), "subintervalos": int(n)},
+        summary={"integral aproximada": float(integral), "subintervalos": int(n), **xi_report},
         plot_series=[
             {"name": "f(x)", "x": x, "y": y, "style": "line"},
             {"name": "nodos", "x": x, "y": y, "style": "scatter"},
@@ -812,14 +1185,23 @@ def _run_simpson_38_simple(data: dict) -> dict:
     x2 = a + 2 * h
     x3 = b
 
-    y0 = float(f(x0))
-    y1 = float(f(x1))
-    y2 = float(f(x2))
-    y3 = float(f(x3))
+    y0 = float(_safe_evaluate_univariate(data["fx"], x0))
+    y1 = float(_safe_evaluate_univariate(data["fx"], x1))
+    y2 = float(_safe_evaluate_univariate(data["fx"], x2))
+    y3 = float(_safe_evaluate_univariate(data["fx"], x3))
     integral = (3 * h / 8.0) * (y0 + 3 * y1 + 3 * y2 + y3)
+    xi_report = _integration_truncation_report(
+        data["fx"],
+        data.get("xi", 0.5 * (a + b)),
+        a,
+        b,
+        4,
+        -((b - a) ** 5) / 6480.0,
+        "f''''(xi)",
+    )
 
     grid = np.linspace(a, b, 250)
-    y_grid = np.asarray(f(grid), dtype=float)
+    y_grid = _safe_evaluate_univariate(data["fx"], grid)
     combined_plot, _ = _aux_plot_simpson_panels(
         f,
         a,
@@ -827,12 +1209,13 @@ def _run_simpson_38_simple(data: dict) -> dict:
         np.array([x0, x1, x2, x3]),
         panel_size=3,
         title="Simpson 3/8 simple",
+        expression=data["fx"],
     )
 
     return _result_payload(
         title="Resultado: Simpson 3/8 simple",
         description=f"Integral aproximada de f(x) = {data['fx']}",
-        summary={"integral aproximada": float(integral), "intervalo": f"[{a}, {b}]"},
+        summary={"integral aproximada": float(integral), "intervalo": f"[{a}, {b}]", **xi_report},
         plot_series=[
             {"name": "f(x)", "x": grid, "y": y_grid, "style": "line"},
             {
@@ -858,9 +1241,19 @@ def _run_simpson_38_composite(data: dict) -> dict:
     if n % 3 != 0:
         raise SimulationInputError("Para Simpson 3/8 compuesta, n debe ser multiplo de 3.")
 
-    x = np.linspace(a, b, n + 1)
-    y = np.asarray(f(x), dtype=float)
     h = (b - a) / n
+    xi_report = _integration_truncation_report(
+        data["fx"],
+        data.get("xi", 0.5 * (a + b)),
+        a,
+        b,
+        4,
+        -((b - a) * (h ** 4)) / 80.0,
+        "f''''(xi)",
+    )
+
+    x = np.linspace(a, b, n + 1)
+    y = _safe_evaluate_univariate(data["fx"], x)
 
     mask = np.arange(1, n)
     sum_mult_3 = np.sum(y[(mask % 3) == 0])
@@ -873,12 +1266,13 @@ def _run_simpson_38_composite(data: dict) -> dict:
         x,
         panel_size=3,
         title="Simpson 3/8 compuesta",
+        expression=data["fx"],
     )
 
     return _result_payload(
         title="Resultado: Simpson 3/8 compuesta",
         description=f"Integral aproximada de f(x) = {data['fx']}",
-        summary={"integral aproximada": float(integral), "subintervalos": int(n)},
+        summary={"integral aproximada": float(integral), "subintervalos": int(n), **xi_report},
         plot_series=[
             {"name": "f(x)", "x": x, "y": y, "style": "line"},
             {"name": "nodos", "x": x, "y": y, "style": "scatter"},
@@ -898,18 +1292,35 @@ def _run_rectangle_rule(data: dict) -> dict:
     n = _ensure_positive_int(data["n"], "n")
 
     h = (b - a) / n
+    xi_report = _integration_truncation_report(
+        data["fx"],
+        data.get("xi", 0.5 * (a + b)),
+        a,
+        b,
+        2,
+        -((b - a) * (h ** 2)) / 24.0,
+        "f''(xi)",
+    )
+
     midpoints = a + (np.arange(n) + 0.5) * h
-    f_mid = np.asarray(f(midpoints), dtype=float)
+    f_mid = _safe_evaluate_univariate(data["fx"], midpoints)
     integral = h * np.sum(f_mid)
 
     dense_x = np.linspace(a, b, 400)
-    dense_y = np.asarray(f(dense_x), dtype=float)
-    combined_plot = _aux_plot_rectangles_midpoint(f, a, b, n, "Regla del rectangulo (punto medio)")
+    dense_y = _safe_evaluate_univariate(data["fx"], dense_x)
+    combined_plot = _aux_plot_rectangles_midpoint(
+        f,
+        a,
+        b,
+        n,
+        "Regla del rectangulo (punto medio)",
+        expression=data["fx"],
+    )
 
     return _result_payload(
         title="Resultado: Regla del rectangulo (punto medio)",
         description=f"Integral aproximada de f(x) = {data['fx']}",
-        summary={"integral aproximada": float(integral), "subintervalos": int(n)},
+        summary={"integral aproximada": float(integral), "subintervalos": int(n), **xi_report},
         plot_series=[
             {"name": "f(x)", "x": dense_x, "y": dense_y, "style": "line"},
             {"name": "puntos medios", "x": midpoints, "y": f_mid, "style": "scatter"},
@@ -1159,6 +1570,8 @@ def register_default_simulations() -> None:
             ),
             parameters=(
                 ParameterSpec("x0", "Valor inicial x0", "float", 0.5),
+                ParameterSpec("a", "Extremo inferior (visualizacion)", "float", -0.5),
+                ParameterSpec("b", "Extremo superior (visualizacion)", "float", 1.5),
                 ParameterSpec("tol", "Tolerancia", "float", 1e-6, 1e-12, 1.0),
                 ParameterSpec("max_iter", "Max iteraciones", "int", 100, 1, 10000),
             ),
@@ -1274,6 +1687,7 @@ def register_default_simulations() -> None:
             parameters=(
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
+                ParameterSpec("xi", "Punto xi (en [a, b])", "float", 1.5707963267948966),
             ),
             runner=_run_trapezoid_simple,
         )
@@ -1291,6 +1705,7 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("n", "Cantidad de subintervalos", "int", 12, 1, 100000),
+                ParameterSpec("xi", "Punto xi (en [a, b])", "float", 1.5707963267948966),
             ),
             runner=_run_trapezoid_composite,
         )
@@ -1307,6 +1722,7 @@ def register_default_simulations() -> None:
             parameters=(
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
+                ParameterSpec("xi", "Punto xi (en [a, b])", "float", 1.5707963267948966),
             ),
             runner=_run_simpson_13_simple,
         )
@@ -1324,6 +1740,7 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("n", "Cantidad de subintervalos (par)", "int", 12, 2, 100000),
+                ParameterSpec("xi", "Punto xi (en [a, b])", "float", 1.5707963267948966),
             ),
             runner=_run_simpson_13_composite,
         )
@@ -1340,6 +1757,7 @@ def register_default_simulations() -> None:
             parameters=(
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
+                ParameterSpec("xi", "Punto xi (en [a, b])", "float", 1.5707963267948966),
             ),
             runner=_run_simpson_38_simple,
         )
@@ -1357,6 +1775,7 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("n", "Cantidad de subintervalos (multiplo de 3)", "int", 12, 3, 100000),
+                ParameterSpec("xi", "Punto xi (en [a, b])", "float", 1.5707963267948966),
             ),
             runner=_run_simpson_38_composite,
         )
@@ -1374,6 +1793,7 @@ def register_default_simulations() -> None:
                 ParameterSpec("a", "Limite inferior a", "float", 0.0),
                 ParameterSpec("b", "Limite superior b", "float", 3.14159),
                 ParameterSpec("n", "Cantidad de subintervalos", "int", 10, 1, 100000),
+                ParameterSpec("xi", "Punto xi (en [a, b])", "float", 1.5707963267948966),
             ),
             runner=_run_rectangle_rule,
         )

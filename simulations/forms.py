@@ -46,6 +46,8 @@ class DynamicSimulationForm(forms.Form):
                 "initial": parameter.default,
                 "help_text": parameter.help_text,
             }
+            if parameter.name == "xi":
+                common_kwargs["required"] = False
             self.fields[parameter.name] = self._build_parameter_field(parameter, common_kwargs)
 
         if "precision" not in self.fields:
